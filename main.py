@@ -32,6 +32,8 @@ def get_args():
     ap.add_argument('-r', '--resume_state', help='checkpoint to resume training')
     ap.add_argument('-z', '--z_dims', type=int, default=-1,
                     help='number of latent channels')
+    ap.add_argument('-x', '--x_dims', type=int, default=-1,
+                    help='number of latent channels')
 
     # Training log opts
     ap.add_argument('-w', '--working_dir', default='experiments',
@@ -60,7 +62,10 @@ def get_args():
     args = ap.parse_args()
     logging.basicConfig(level=args.loglevel)
     torch.manual_seed(args.random_seed)
+
     assert args.scale % 4 == 0
+    if args.operation == 'test':
+        assert os.path.isfile(args.resume_state)
 
     return args
 
@@ -74,6 +79,8 @@ if __name__ == '__main__':
     # Create data loader
     if args.operation == 'train':
         data = VideoTrainDataset(args)
+    elif args.operation == 'test':
+        data = VideoAllDataset(args)
     loader = get_loader(data, batch=6)
     hr_img = data[0]['hr'].to('cuda')
     lr_img = data[0]['lr']
@@ -82,13 +89,17 @@ if __name__ == '__main__':
     inn = UnconditionalSRFlow(*hr_img.shape, args)
 
     # Figure out number of latent variables
-    out = inn.infer(hr_img.unsqueeze(0))
-    args.z_dims = out.shape[1] - lr_img.shape[0]
+    out = inn.infer([next(iter(loader))], args)
+    args.x_dims = lr_img.shape[0]
+    args.z_dims = out.shape[1] - args.x_dims + 1
     logging.info(f'HR_dims: {hr_img.shape}')
     logging.info(f'LR_dims: {lr_img.shape}')
-    latents = torch.normal(0, args.sigma, size=out[:,-args.z_dims:,:,:].squeeze().shape)
+    latents = torch.normal(0, args.sigma, size=out[0,-args.z_dims:,:,:].squeeze().shape)
     logging.info(f'latent_dims: {latents.shape}')
     assert torch.cat((lr_img, latents), dim=0).numel() == hr_img.numel()
 
     if args.operation == 'train':
         inn.bidirectional_train(loader, args)
+    elif args.operation == 'test':
+        # TODO add test loader
+        inn.infer(loader, args, rev=True, save_videos=True)

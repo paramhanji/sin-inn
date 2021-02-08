@@ -1,6 +1,12 @@
-import logging, os, tqdm
+import logging, os, subprocess as sp, tqdm
+import numpy as np
+from PIL import Image
+
 import torch, torch.nn as nn
 from torch.autograd import Variable
+import torchvision.transforms as transforms
+from torch.utils.tensorboard import SummaryWriter
+
 import FrEIA.framework as Ff
 import FrEIA.modules as Fm
 
@@ -68,8 +74,7 @@ class UnconditionalSRFlow():
                                           name=f'permute_{ss}_{kk}'))
 
         self.nodes.append(Ff.OutputNode(self.nodes[-1], name='output'))
-        # self.inn = Ff.ReversibleGraphNet(self.nodes, verbose=(opt.loglevel == logging.INFO))
-        self.inn = Ff.ReversibleGraphNet(self.nodes, verbose=False).to('cuda')
+        self.inn = Ff.ReversibleGraphNet(self.nodes, verbose=(opt.loglevel == logging.INFO)).to('cuda')
 
         if opt.operation == 'train':
             params_trainable = list(filter(lambda p: p.requires_grad, self.inn.parameters()))
@@ -82,10 +87,10 @@ class UnconditionalSRFlow():
             self.epoch_start = 0
 
         if opt.resume_state:
-            checkpoint = opt.resume_state
-            self.inn.load_state_dict(torch.load(checkpoint['model_state_dict']))
+            checkpoint = torch.load(opt.resume_state)
+            self.inn.load_state_dict(checkpoint['model_state_dict'])
             if opt.operation == 'train':
-                self.optimizer.load_state_dict(torch.load(checkpoint['optimizer_state_dict']))
+                self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
                 self.epoch_start = checkpoint['epoch']
 
     def bidirectional_train(self, loader, opt):
@@ -98,9 +103,13 @@ class UnconditionalSRFlow():
 
         # Archive experiment dir if it exists
         exp_dir = os.path.join(opt.working_dir, opt.operation, opt.name)
-        if os.path.isdir(exp_dir):
-            os.rename(exp_dir, f'{exp_dir}_old')
-        os.makedirs(exp_dir)
+        if os.path.isdir(exp_dir) and not opt.resume_state:
+            from datetime import datetime
+            os.rename(exp_dir, f'{exp_dir}_{datetime.now()}')
+        if not os.path.isdir(exp_dir):
+            os.makedirs(exp_dir)
+        # TODO: What about multiple runs?
+        writer = SummaryWriter(exp_dir)
 
         self.inn.train()
         for e in range(self.epoch_start, opt.epochs):
@@ -148,8 +157,91 @@ class UnconditionalSRFlow():
                     tepoch.set_postfix(losses)
 
 
-    def infer(self, x):
+    def infer(self, loader, opt, rev=False, temp=0.8, save_images=False, save_videos=False):
         self.inn.eval()
-        with torch.no_grad():
-            y_hat = self.inn.forward(x)
-        return y_hat
+        trans = transforms.ToPILImage()
+        
+        if save_videos:
+            save_path = os.path.join(opt.working_dir, opt.operation,
+                                     f'{opt.name}_{os.path.basename(opt.resume_state).strip(".pth")}',
+                                     'videos')
+            if not os.path.isdir(save_path):
+                os.makedirs(save_path)
+
+            # Create subprocess pipes to feed ffmpeg
+            dump = open(os.devnull, 'w')
+            video_in = sp.Popen(['ffmpeg', '-framerate', '60', '-i', '-', '-vf', 'scale=iw*16:ih*16',
+                                 '-c:v', 'libx264', '-preset', 'ultrafast', '-y',
+                                 os.path.join(save_path, 'in.avi')],
+                                stdin=sp.PIPE, stderr=dump)
+            video_out = sp.Popen(['ffmpeg', '-framerate', '60', '-i', '-', '-c:v', 'libx264',
+                                  '-preset', 'ultrafast', '-y', os.path.join(save_path, 'out.avi')],
+                                  stdin=sp.PIPE, stderr=dump)
+            video_gt = sp.Popen(['ffmpeg', '-framerate', '60', '-i', '-', '-c:v', 'libx264',
+                                 '-preset', 'ultrafast', '-y', os.path.join(save_path, 'gt.avi')],
+                                stdin=sp.PIPE, stderr=dump)
+
+        for bb, batch in enumerate(tqdm.tqdm(loader)):
+            b, c, h, w = batch['lr'].shape
+
+            if rev:                    
+                imgs_in = []
+                gt = [trans(img) for img in batch['hr']]
+                for lr in batch['lr']:
+                    col = Image.new('RGB', (w, h*c//3))
+                    for i in range(0, c, 3):
+                        img = trans(lr[i: i+3])
+                        col.paste(img, (0, i//3 * h))
+                    imgs_in.append(col)
+
+                # Sample from latents
+                z = torch.normal(0, temp*opt.sigma, size=(b, opt.z_dims, h, w))
+                input = torch.cat((batch['lr'], z), dim=1)
+            else:
+                input = batch['hr']
+                imgs_in = [trans(img) for img in batch['hr']]
+
+            # The forward/backward pass
+            with torch.no_grad():
+                input = input.to('cuda')
+                output = self.inn.forward(input, rev=rev).to('cpu')
+
+            if rev:
+                imgs_out = [trans(img) for img in output]
+            else:
+                # Remove latents
+                output = output[:,:opt.x_dims,:,:]
+
+                imgs_out = []
+                for imgs in output:
+                    row = Image.new('RGB', (w, h*c//3))
+                    for i in range(0, c, 3):
+                        img = trans(imgs[i: i+3])
+                        row.paste(img, (0, i//3 * h))
+                    imgs_out.append(row)
+
+            if save_images:
+                save_path = os.path.join(opt.working_dir, opt.operation,
+                                         f'{opt.name}_{os.path.basename(opt.resume_state).strip(".pth")}',
+                                         'frames')
+                if not os.path.isdir(save_path):
+                    os.makedirs(save_path)
+                for i, (im_in, im_out, im_gt) in enumerate(zip(imgs_in, imgs_out, gt)):
+                    im_in.save(os.path.join(save_path, f'in_{bb:04d}_{i:02d}.png'))
+                    im_out.save(os.path.join(save_path, f'out_{bb:04d}_{i:02d}.png'))
+                    im_gt.save(os.path.join(save_path, f'gt_{bb:04d}_{i:02d}.png'))
+
+            if save_videos:
+                for i, (im_in, im_out, im_gt) in enumerate(zip(imgs_in, imgs_out, gt)):
+                    # Extract only middle frame
+                    im_in = im_in.crop((0, h*opt.lr_window//2, w, h*(opt.lr_window//2 + 1)))
+                    im_in.save(video_in.stdin, 'PNG')
+                    im_out.save(video_out.stdin, 'PNG')
+                    im_gt.save(video_gt.stdin, 'PNG')
+
+        if save_videos:
+            video_in.stdin.close(); video_out.communicate()
+            video_out.stdin.close(); video_out.communicate()
+            video_gt.stdin.close(); video_gt.communicate()
+
+        return output
