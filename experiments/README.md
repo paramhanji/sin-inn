@@ -1,0 +1,1 @@
+Directory were all the intermediate training states and logs are stored.
