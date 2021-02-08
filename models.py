@@ -46,7 +46,7 @@ class UnconditionalSRFlow():
 
             # Single transition step
             # TODO: How do we compute M to pass to 1x1Conv?
-            # The paper states this prevents block artifacts
+            # SR-flow paper states this prevents block artifacts
             # self.nodes.append(Ff.Node(self.nodes[-1],
             #                           Fm.ActNorm,
             #                           {},
@@ -113,13 +113,6 @@ class UnconditionalSRFlow():
 
         self.inn.train()
         for e in range(self.epoch_start, opt.epochs):
-            if e != 0 and e % opt.save_iter == 0:
-                save_path = os.path.join(exp_dir, f'epoch_{e:05d}.pth')
-                logging.info(f'Saving state at {save_path}')
-                torch.save({'model_state_dict': self.inn.state_dict(),
-                            'optimizer_state_dict': self.optimizer.state_dict(),
-                            'epoch': e}, save_path)
-
             with tqdm.tqdm(loader, unit="batch") as tepoch:
                 for batch in tepoch:
                     tepoch.set_description(f"Epoch {e}/{opt.epochs}")
@@ -155,6 +148,20 @@ class UnconditionalSRFlow():
 
                     losses = {k: v.item() for k, v in losses.items()}
                     tepoch.set_postfix(losses)
+
+            if (e+1) % opt.save_iter == 0:
+                save_path = os.path.join(exp_dir, f'epoch_{e+1:05d}.pth')
+                logging.info(f'Saving state at {save_path}')
+                torch.save({'model_state_dict': self.inn.state_dict(),
+                            'optimizer_state_dict': self.optimizer.state_dict(),
+                            'epoch': e+1}, save_path)
+
+            if (e+1) % opt.print_iter == 0:
+                writer.add_scalar('Loss/train', total_loss, e)
+                for l in losses:
+                    writer.add_scalar(f'Loss/{loss}', losses[l], e)
+
+        writer.close()
 
 
     def infer(self, loader, opt, rev=False, temp=0.8, save_images=False, save_videos=False):
