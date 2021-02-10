@@ -155,6 +155,7 @@ class UnconditionalSRFlow():
                                 'epoch': e+1}, save_path)
 
                 if (e+1) % opt.print_iter == 0:
+                    # TODO: print a validation loss
                     logging.info(losses)
                     writer.add_scalar('Loss/train', total_loss, e)
                     for l in losses:
@@ -177,14 +178,14 @@ class UnconditionalSRFlow():
 
             # Create subprocess pipes to feed ffmpeg
             dump = open(os.devnull, 'w')
-            video_in = sp.Popen(['ffmpeg', '-framerate', '60', '-i', '-', '-vf', 'scale=iw*16:ih*16',
+            video_in = sp.Popen(['ffmpeg', '-framerate', '120', '-i', '-', '-vf', 'scale=iw*16:ih*16',
                                  '-c:v', 'libx264', '-preset', 'ultrafast', '-y',
                                  os.path.join(save_path, 'in.avi')],
                                 stdin=sp.PIPE, stderr=dump)
-            video_out = sp.Popen(['ffmpeg', '-framerate', '60', '-i', '-', '-c:v', 'libx264',
+            video_out = sp.Popen(['ffmpeg', '-framerate', '120', '-i', '-', '-c:v', 'libx264',
                                   '-preset', 'ultrafast', '-y', os.path.join(save_path, 'out.avi')],
                                   stdin=sp.PIPE, stderr=dump)
-            video_gt = sp.Popen(['ffmpeg', '-framerate', '60', '-i', '-', '-c:v', 'libx264',
+            video_gt = sp.Popen(['ffmpeg', '-framerate', '120', '-i', '-', '-c:v', 'libx264',
                                  '-preset', 'ultrafast', '-y', os.path.join(save_path, 'gt.avi')],
                                 stdin=sp.PIPE, stderr=dump)
 

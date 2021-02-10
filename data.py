@@ -14,7 +14,6 @@ class VideoTrainDataset(Dataset):
         lr_dir = os.path.join(opt.dataset, 'lr_frames', opt.scene)
         hr_dir = os.path.join(opt.dataset, 'hr_frames', opt.scene)
         num_lr = len(os.listdir(lr_dir)) - 1
-        num_hr = num_lr * 120 // opt.fps
         
         self.lr_idx = []
         self.hr_idx = []
@@ -53,7 +52,6 @@ class VideoAllDataset(Dataset):
         lr_dir = os.path.join(opt.dataset, 'lr_frames', opt.scene)
         hr_dir = os.path.join(opt.dataset, 'hr_frames', opt.scene)
         num_lr = len(os.listdir(lr_dir)) - 1
-        num_hr = num_lr * 120 // opt.fps
         
         self.lr_idx = []
         self.hr_idx = []

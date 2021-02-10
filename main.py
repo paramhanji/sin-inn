@@ -22,6 +22,9 @@ def get_args():
                     help='FPS of high-res frames (low-res frames are assumed to be 120fps)')
     ap.add_argument('--lr_window', type=int, default=10,
                     help='# of input low-res frames to use on either side of 1 high-res frame')
+    ap.add_argument('-b', '--batch_size', type=int, default=6,
+                    help='batch size to use; on 12GB 1080ti with default architecture and\
+                    22x40 input-frame resolution use 6 for training and 40 for inference')
 
     # Architecture opts
     ap.add_argument('--scale', type=int, default=16,
@@ -80,7 +83,7 @@ if __name__ == '__main__':
         data = VideoTrainDataset(args)
     elif args.operation == 'test':
         data = VideoAllDataset(args)
-    loader = get_loader(data, batch=6)
+    loader = get_loader(data, batch=args.batch_size)
     hr_img = data[0]['hr'].to('cuda')
     lr_img = data[0]['lr']
 
