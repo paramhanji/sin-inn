@@ -102,7 +102,7 @@ class UnconditionalSRFlow():
         """
 
         # Archive experiment dir if it exists
-        exp_dir = os.path.join(opt.working_dir, opt.operation, opt.name)
+        exp_dir = os.path.join(opt.working_dir, opt.operation, f'{opt.scene}_{opt.fps}')
         if os.path.isdir(exp_dir) and not opt.resume_state:
             from datetime import datetime
             os.rename(exp_dir, f'{exp_dir}_{datetime.now()}')
@@ -170,7 +170,7 @@ class UnconditionalSRFlow():
         
         if save_videos:
             save_path = os.path.join(opt.working_dir, opt.operation,
-                                     f'{opt.name}_{os.path.basename(opt.resume_state).strip(".pth")}',
+                                     f'{opt.scene}_{opt.fps}_{os.path.basename(opt.resume_state).strip(".pth")}',
                                      'videos')
             if not os.path.isdir(save_path):
                 os.makedirs(save_path)
@@ -229,7 +229,7 @@ class UnconditionalSRFlow():
 
             if save_images:
                 save_path = os.path.join(opt.working_dir, opt.operation,
-                                         f'{opt.name}_{os.path.basename(opt.resume_state).strip(".pth")}',
+                                         f'{opt.scene}_{opt.fps}_{os.path.basename(opt.resume_state).strip(".pth")}',
                                          'frames')
                 if not os.path.isdir(save_path):
                     os.makedirs(save_path)

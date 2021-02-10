@@ -9,7 +9,6 @@ data_root = '/local/scratch/pmh64/datasets/adobe240f'
 def get_args():
     ap = argparse.ArgumentParser(description='Train SR-Flow on single image')
     ap.add_argument('operation', choices=['train', 'test'])
-    ap.add_argument('-n', '--name', default='pilot', help='unique identifier')
     ap.add_argument('-d', '--debug', action="store_const", dest="loglevel",
                     const=logging.DEBUG, default=logging.WARNING)
     ap.add_argument('-v', '--verbose', action="store_const", dest="loglevel", const=logging.INFO)
@@ -101,5 +100,4 @@ if __name__ == '__main__':
     if args.operation == 'train':
         inn.bidirectional_train(loader, args)
     elif args.operation == 'test':
-        # TODO add test loader
-        inn.infer(loader, args, rev=True, save_videos=True)
+        inn.infer(loader, args, rev=True, save_videos=True, temp=0.01)
