@@ -1,4 +1,5 @@
-import logging, os, subprocess as sp, tqdm
+import logging, os, subprocess as sp
+from alive_progress import alive_bar
 import numpy as np
 from PIL import Image
 
@@ -112,11 +113,9 @@ class UnconditionalSRFlow():
         writer = SummaryWriter(exp_dir)
 
         self.inn.train()
-        for e in range(self.epoch_start, opt.epochs):
-            with tqdm.tqdm(loader, unit="batch") as tepoch:
-                for batch in tepoch:
-                    tepoch.set_description(f"Epoch {e}/{opt.epochs}")
-
+        with alive_bar(opt.epochs - self.epoch_start) as bar:
+            for e in range(self.epoch_start, opt.epochs):
+                for batch in loader:
                     # Forward pass
                     hr = Variable(batch['hr']).to('cuda')
                     lr_hat = self.inn(hr)
@@ -147,19 +146,20 @@ class UnconditionalSRFlow():
                     self.optimizer.step()
 
                     losses = {k: v.item() for k, v in losses.items()}
-                    tepoch.set_postfix(losses)
 
-            if (e+1) % opt.save_iter == 0:
-                save_path = os.path.join(exp_dir, f'epoch_{e+1:05d}.pth')
-                logging.info(f'Saving state at {save_path}')
-                torch.save({'model_state_dict': self.inn.state_dict(),
-                            'optimizer_state_dict': self.optimizer.state_dict(),
-                            'epoch': e+1}, save_path)
+                if (e+1) % opt.save_iter == 0:
+                    save_path = os.path.join(exp_dir, f'epoch_{e+1:05d}.pth')
+                    logging.info(f'Saving state at {save_path}')
+                    torch.save({'model_state_dict': self.inn.state_dict(),
+                                'optimizer_state_dict': self.optimizer.state_dict(),
+                                'epoch': e+1}, save_path)
 
-            if (e+1) % opt.print_iter == 0:
-                writer.add_scalar('Loss/train', total_loss, e)
-                for l in losses:
-                    writer.add_scalar(f'Loss/{loss}', losses[l], e)
+                if (e+1) % opt.print_iter == 0:
+                    logging.info(losses)
+                    writer.add_scalar('Loss/train', total_loss, e)
+                    for l in losses:
+                        writer.add_scalar(f'Loss/{loss}', losses[l], e)
+                bar()
 
         writer.close()
 
@@ -188,63 +188,65 @@ class UnconditionalSRFlow():
                                  '-preset', 'ultrafast', '-y', os.path.join(save_path, 'gt.avi')],
                                 stdin=sp.PIPE, stderr=dump)
 
-        for bb, batch in enumerate(tqdm.tqdm(loader)):
-            b, c, h, w = batch['lr'].shape
+        with alive_bar(len(loader)) as bar:
+            for bb, batch in enumerate(loader):
+                b, c, h, w = batch['lr'].shape
 
-            if rev:                    
-                imgs_in = []
-                gt = [trans(img) for img in batch['hr']]
-                for lr in batch['lr']:
-                    col = Image.new('RGB', (w, h*c//3))
-                    for i in range(0, c, 3):
-                        img = trans(lr[i: i+3])
-                        col.paste(img, (0, i//3 * h))
-                    imgs_in.append(col)
+                if rev:                    
+                    imgs_in = []
+                    gt = [trans(img) for img in batch['hr']]
+                    for lr in batch['lr']:
+                        col = Image.new('RGB', (w, h*c//3))
+                        for i in range(0, c, 3):
+                            img = trans(lr[i: i+3])
+                            col.paste(img, (0, i//3 * h))
+                        imgs_in.append(col)
 
-                # Sample from latents
-                z = torch.normal(0, temp*opt.sigma, size=(b, opt.z_dims, h, w))
-                input = torch.cat((batch['lr'], z), dim=1)
-            else:
-                input = batch['hr']
-                imgs_in = [trans(img) for img in batch['hr']]
+                    # Sample from latents
+                    z = torch.normal(0, temp*opt.sigma, size=(b, opt.z_dims, h, w))
+                    input = torch.cat((batch['lr'], z), dim=1)
+                else:
+                    input = batch['hr']
+                    imgs_in = [trans(img) for img in batch['hr']]
 
-            # The forward/backward pass
-            with torch.no_grad():
-                input = input.to('cuda')
-                output = self.inn.forward(input, rev=rev).to('cpu')
+                # The forward/backward pass
+                with torch.no_grad():
+                    input = input.to('cuda')
+                    output = self.inn.forward(input, rev=rev).to('cpu')
 
-            if rev:
-                imgs_out = [trans(img) for img in output]
-            else:
-                # Remove latents
-                output = output[:,:opt.x_dims,:,:]
+                if rev:
+                    imgs_out = [trans(img) for img in output]
+                else:
+                    # Remove latents
+                    output = output[:,:opt.x_dims,:,:]
 
-                imgs_out = []
-                for imgs in output:
-                    row = Image.new('RGB', (w, h*c//3))
-                    for i in range(0, c, 3):
-                        img = trans(imgs[i: i+3])
-                        row.paste(img, (0, i//3 * h))
-                    imgs_out.append(row)
+                    imgs_out = []
+                    for imgs in output:
+                        row = Image.new('RGB', (w, h*c//3))
+                        for i in range(0, c, 3):
+                            img = trans(imgs[i: i+3])
+                            row.paste(img, (0, i//3 * h))
+                        imgs_out.append(row)
 
-            if save_images:
-                save_path = os.path.join(opt.working_dir, opt.operation,
-                                         f'{opt.scene}_{opt.fps}_{os.path.basename(opt.resume_state).strip(".pth")}',
-                                         'frames')
-                if not os.path.isdir(save_path):
-                    os.makedirs(save_path)
-                for i, (im_in, im_out, im_gt) in enumerate(zip(imgs_in, imgs_out, gt)):
-                    im_in.save(os.path.join(save_path, f'in_{bb:04d}_{i:02d}.png'))
-                    im_out.save(os.path.join(save_path, f'out_{bb:04d}_{i:02d}.png'))
-                    im_gt.save(os.path.join(save_path, f'gt_{bb:04d}_{i:02d}.png'))
+                if save_images:
+                    save_path = os.path.join(opt.working_dir, opt.operation,
+                                             f'{opt.scene}_{opt.fps}_{os.path.basename(opt.resume_state).strip(".pth")}',
+                                             'frames')
+                    if not os.path.isdir(save_path):
+                        os.makedirs(save_path)
+                    for i, (im_in, im_out, im_gt) in enumerate(zip(imgs_in, imgs_out, gt)):
+                        im_in.save(os.path.join(save_path, f'in_{bb:04d}_{i:02d}.png'))
+                        im_out.save(os.path.join(save_path, f'out_{bb:04d}_{i:02d}.png'))
+                        im_gt.save(os.path.join(save_path, f'gt_{bb:04d}_{i:02d}.png'))
 
-            if save_videos:
-                for i, (im_in, im_out, im_gt) in enumerate(zip(imgs_in, imgs_out, gt)):
-                    # Extract only middle frame
-                    im_in = im_in.crop((0, h*opt.lr_window//2, w, h*(opt.lr_window//2 + 1)))
-                    im_in.save(video_in.stdin, 'PNG')
-                    im_out.save(video_out.stdin, 'PNG')
-                    im_gt.save(video_gt.stdin, 'PNG')
+                if save_videos:
+                    for i, (im_in, im_out, im_gt) in enumerate(zip(imgs_in, imgs_out, gt)):
+                        # Extract only middle frame
+                        im_in = im_in.crop((0, h*opt.lr_window//2, w, h*(opt.lr_window//2 + 1)))
+                        im_in.save(video_in.stdin, 'PNG')
+                        im_out.save(video_out.stdin, 'PNG')
+                        im_gt.save(video_gt.stdin, 'PNG')
+                bar()
 
         if save_videos:
             video_in.stdin.close(); video_out.communicate()
