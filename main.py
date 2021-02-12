@@ -32,10 +32,6 @@ def get_args():
     ap.add_argument('-c', '--num_coupling', type=int, default=2,
                     help='number of GLOW blocks between downsamples')
     ap.add_argument('-r', '--resume_state', help='checkpoint to resume training')
-    ap.add_argument('-z', '--z_dims', type=int, default=-1,
-                    help='number of latent channels')
-    ap.add_argument('-x', '--x_dims', type=int, default=-1,
-                    help='number of latent channels')
 
     # Training log opts
     ap.add_argument('-w', '--working_dir', default='experiments',
@@ -56,12 +52,18 @@ def get_args():
     ap.add_argument('--lambda_bwd_mmd', type=float, default=500)
     ap.add_argument('--random_seed', type=int, default=0)
 
+    ap.add_argument('-t', '--temp', type=float, default=0.8, help='temperature to sample latents')
+    ap.add_argument('--lr_dims', type=int, default=-1, help='internal: dimensionality of LR')
+    ap.add_argument('--z_dims', type=int, default=-1, help='internal: dimensionality of latents')
+
     # TODO: based on https://github.com/VLL-HD/FrEIA#useful-tips-engineering-heuristics
     # ap.add_argument('-n', '--noise', type=float, default=0.01,
     #                 help='noise added to input to stabilise training')
-    ap.add_argument('--sigma', type=float, default=1, help='sigma for latent space')
     
     args = ap.parse_args()
+    # Assuming 16x SR, 16*16*h*w*3 == lr_dims*h*w + z_dims*h*w
+    args.lr_dims = (2*args.lr_window + 1)*3
+    args.z_dims = 16*16*3 - args.lr_dims
     logging.basicConfig(level=args.loglevel)
     torch.manual_seed(args.random_seed)
 
@@ -81,6 +83,8 @@ if __name__ == '__main__':
     # Create data loader
     if args.operation == 'train':
         data = VideoTrainDataset(args)
+        val_data = VideoValDataset(args, 15)
+        val_loader = get_loader(data, batch=15)
     elif args.operation == 'test':
         data = VideoAllDataset(args)
     loader = get_loader(data, batch=args.batch_size)
@@ -91,16 +95,17 @@ if __name__ == '__main__':
     inn = UnconditionalSRFlow(*hr_img.shape, args)
 
     # Figure out number of latent variables
-    out = inn.infer([next(iter(loader))], args)
-    args.x_dims = lr_img.shape[0]
-    args.z_dims = out.shape[1] - args.x_dims + 1
-    logging.info(f'HR_dims: {hr_img.shape}')
-    logging.info(f'LR_dims: {lr_img.shape}')
-    latents = torch.normal(0, args.sigma, size=out[0,-args.z_dims:,:,:].squeeze().shape)
-    logging.info(f'latent_dims: {latents.shape}')
-    assert torch.cat((lr_img, latents), dim=0).numel() == hr_img.numel()
+    if args.loglevel == logging.DEBUG:
+        out, _ = inn.infer([next(iter(loader))], args)
+        print(out.shape)
+        latents = torch.randn(out[0,args.lr_dims:,:,:].shape)
+        logging.debug(f'HR_dims: {hr_img.shape}')
+        logging.debug(f'LR_dims: {lr_img.shape}')
+        logging.debug(f'Latent_dims: {latents.shape}')
+        assert lr_img.numel() + latents.numel() == hr_img.numel()
 
     if args.operation == 'train':
-        inn.bidirectional_train(loader, args)
+        inn.bidirectional_train(loader, val_loader, args)
     elif args.operation == 'test':
-        inn.infer(loader, args, rev=True, save_videos=True, temp=0.01)
+        # args.temp = 0.01    # remove this after comparing with previous results
+        inn.infer(loader, args, rev=True, save_videos=True)

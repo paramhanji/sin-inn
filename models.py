@@ -94,7 +94,7 @@ class UnconditionalSRFlow():
                 self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
                 self.epoch_start = checkpoint['epoch']
 
-    def bidirectional_train(self, loader, opt):
+    def bidirectional_train(self, train_loader, val_loader, opt):
         """
         Start with forward pass (HR->LR) and compute reconstruction + likelihood + MMD loss.
         Then reverse pass (LR->HR) and compute reconstruction + MMD loss.
@@ -115,37 +115,38 @@ class UnconditionalSRFlow():
         self.inn.train()
         with alive_bar(opt.epochs - self.epoch_start) as bar:
             for e in range(self.epoch_start, opt.epochs):
-                for batch in loader:
-                    # Forward pass
-                    hr = Variable(batch['hr']).to('cuda')
-                    lr_hat = self.inn(hr)
-
-                    # Sample latents and construct GT [lr, y]
-                    lr = batch['lr']
-                    z = torch.normal(0, opt.sigma, size=lr_hat[:,-opt.z_dims:,:,:].shape)
-                    lr = torch.cat((lr, z), dim=1)
-                    lr = Variable(lr).to('cuda')
-                    # Backward pass
-                    hr_hat = self.inn(lr, rev=True)
+                for batch in train_loader:
+                    ''' TODO:
+                    1. Perturb with gaussian noise
+                    2. Backward MMD might need to be ramped up
+                    3. Can model be trained without backward rec loss?
+                    4. Hyperparameters (lambdas)
+                    '''
                     self.optimizer.zero_grad()
-
-                    losses= {}
-                    # Add all forward losses
-                    losses['fwd_rec'] = opt.lambda_fwd_rec * loss.reconstruction(lr_hat[:,:-opt.z_dims,:,:], lr[:,:-opt.z_dims,:,:])
-                    lr_grad_blocked = torch.cat((lr_hat[:,:-opt.z_dims,:,:],
-                                                 lr_hat[:,-opt.z_dims:,:,:].data), dim=1)
-                    losses['fwd_mmd'] = opt.lambda_fwd_mmd * loss.mmd(lr_grad_blocked, lr)
+                    b, _, h, w = batch['lr'].shape
 
 
-                    # Add all inverse losses
-                    losses['bwd_rec'] = opt.lambda_bwd_rec * loss.reconstruction(hr_hat, hr)
-                    losses['bwd_mmd'] = opt.lambda_bwd_mmd * loss.mmd(hr_hat, hr, rev=True)
-                    
-                    total_loss = torch.stack(list(losses.values()), dim=0).sum()
-                    total_loss.backward()
+                    hr = Variable(batch['hr']).to('cuda')
+                    lr = batch['lr'].to('cuda')
+                    z = torch.randn(b, opt.z_dims, h, w).to('cuda')
+                    lr_z = Variable(torch.cat((lr, z), dim=1))
+
+                    # Forward pass
+                    lr_z_hat = self.inn(hr)
+                    blocked_lr_z_hat = torch.cat((lr_z_hat[:,:opt.lr_dims,:,:].data,
+                                                  lr_z_hat[:,opt.lr_dims:,:,:]), dim=1)
+                    loss_fwd = opt.lambda_fwd_rec * loss.reconstruction(lr_z_hat[:,:opt.lr_dims,:,:], lr)
+                    loss_fwd += opt.lambda_fwd_mmd * loss.mmd(blocked_lr_z_hat, lr_z)
+                    loss_fwd.backward()
+
+                    # Backward pass
+                    # TODO: perturb lr_hat, retain z and compute reconstruction loss
+                    hr_hat = self.inn(lr_z, rev=True)
+                    loss_bwd = opt.lambda_bwd_rec * loss.reconstruction(hr_hat, hr)
+                    loss_bwd += opt.lambda_bwd_mmd * loss.mmd(hr_hat, hr, rev=True)
+                    loss_bwd.backward()
+
                     self.optimizer.step()
-
-                    losses = {k: v.item() for k, v in losses.items()}
 
                 if (e+1) % opt.save_iter == 0:
                     save_path = os.path.join(exp_dir, f'epoch_{e+1:05d}.pth')
@@ -155,19 +156,25 @@ class UnconditionalSRFlow():
                                 'epoch': e+1}, save_path)
 
                 if (e+1) % opt.print_iter == 0:
-                    # TODO: print a validation loss
-                    logging.info(losses)
-                    writer.add_scalar('Loss/train', total_loss, e)
-                    for l in losses:
-                        writer.add_scalar(f'Loss/{loss}', losses[l], e)
+                    writer.add_scalar('Loss/train', loss_fwd + loss_bwd, e)
+                    del hr, lr
+                    _, fwd_losses = self.infer(val_loader, opt)
+                    _, bwd_losses = self.infer(val_loader, opt, rev=True)
+                    all_losses = {**fwd_losses, **bwd_losses}
+                    logging.info(all_losses)
+                    self.inn.train()
+                    for l in all_losses:
+                        writer.add_scalar(f'Loss/{loss}', all_losses[l], e)
                 bar()
 
         writer.close()
 
 
-    def infer(self, loader, opt, rev=False, temp=0.8, save_images=False, save_videos=False):
+    def infer(self, loader, opt, rev=False, save_images=False, save_videos=False):
         self.inn.eval()
         trans = transforms.ToPILImage()
+        losses = dict.fromkeys(['fwd_rec','fwd_mmd','bwd_rec', 'bwd_mmd'], 0)
+
         
         if save_videos:
             save_path = os.path.join(opt.working_dir, opt.operation,
@@ -192,42 +199,55 @@ class UnconditionalSRFlow():
         with alive_bar(len(loader)) as bar:
             for bb, batch in enumerate(loader):
                 b, c, h, w = batch['lr'].shape
+                lr = batch['lr'].to('cuda')
+                hr = batch['hr'].to('cuda')
 
-                if rev:                    
-                    imgs_in = []
-                    gt = [trans(img) for img in batch['hr']]
-                    for lr in batch['lr']:
-                        col = Image.new('RGB', (w, h*c//3))
-                        for i in range(0, c, 3):
-                            img = trans(lr[i: i+3])
-                            col.paste(img, (0, i//3 * h))
-                        imgs_in.append(col)
+
+                if rev:
+                    if save_images or save_videos:
+                        imgs_in = []
+                        gt = [trans(img) for img in hr]
+                        for lr_img in lr:
+                            col = Image.new('RGB', (w, h*c//3))
+                            for i in range(0, c, 3):
+                                img = trans(lr_img[i: i+3])
+                                col.paste(img, (0, i//3 * h))
+                            imgs_in.append(col)
 
                     # Sample from latents
-                    z = torch.normal(0, temp*opt.sigma, size=(b, opt.z_dims, h, w))
-                    input = torch.cat((batch['lr'], z), dim=1)
+                    z = opt.temp * torch.randn(b, opt.z_dims, h, w).to('cuda')
+                    input = torch.cat((lr, z), dim=1)
                 else:
-                    input = batch['hr']
-                    imgs_in = [trans(img) for img in batch['hr']]
+                    input = hr
+                    imgs_in = [trans(img) for img in hr]
 
                 # The forward/backward pass
                 with torch.no_grad():
                     input = input.to('cuda')
-                    output = self.inn.forward(input, rev=rev).to('cpu')
+                    output = self.inn.forward(input, rev=rev)
 
                 if rev:
-                    imgs_out = [trans(img) for img in output]
-                else:
-                    # Remove latents
-                    output = output[:,:opt.x_dims,:,:]
+                    losses['bwd_rec'] += loss.reconstruction(output, hr)
+                    losses['bwd_mmd'] += loss.mmd(output, hr, rev=True)
 
-                    imgs_out = []
-                    for imgs in output:
-                        row = Image.new('RGB', (w, h*c//3))
-                        for i in range(0, c, 3):
-                            img = trans(imgs[i: i+3])
-                            row.paste(img, (0, i//3 * h))
-                        imgs_out.append(row)
+                    if save_images or save_videos:
+                        output.to('cpu')
+                        imgs_out = [trans(img) for img in output]
+                else:
+                    losses['fwd_rec'] += loss.reconstruction(output[:,:opt.lr_dims,:,:], lr)
+                    losses['fwd_mmd'] += loss.mmd(output[:,:opt.lr_dims,:,:], lr)
+
+                    if save_images or save_videos:
+                        # Remove latents
+                        output = output[:,:opt.lr_dims,:,:]
+                        output.to('cpu')
+                        imgs_out = []
+                        for imgs in output:
+                            row = Image.new('RGB', (w, h*c//3))
+                            for i in range(0, c, 3):
+                                img = trans(imgs[i: i+3])
+                                row.paste(img, (0, i//3 * h))
+                            imgs_out.append(row)
 
                 if save_images:
                     save_path = os.path.join(opt.working_dir, opt.operation,
@@ -254,4 +274,5 @@ class UnconditionalSRFlow():
             video_out.stdin.close(); video_out.communicate()
             video_gt.stdin.close(); video_gt.communicate()
 
-        return output
+        losses = {k: v.item()/len(loader) for k, v in losses.items() if v != 0}
+        return output, losses
