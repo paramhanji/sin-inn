@@ -18,6 +18,7 @@ def get_args():
                     help='root directory of dataset')
     ap.add_argument('-s','--scene', default='GOPR9653',
                     help='name of video from which files were extracted')
+    ap.add_argument('--suffix', help='suffix for experiment name')
     ap.add_argument('-f', '--fps', type=int, default=10,
                     help='FPS of high-res frames (low-res frames are assumed to be 120fps)')
     ap.add_argument('--lr_window', type=int, default=10,
@@ -47,9 +48,9 @@ def get_args():
                     help='initial learning rate')
     ap.add_argument('-a', '--adam_betas', nargs=2, default=[0.9, 0.95])
     ap.add_argument('--lambda_fwd_rec', type=float, default=1)
-    ap.add_argument('--lambda_fwd_mmd', type=float, default=50)
+    ap.add_argument('--lambda_fwd_mmd', type=float, default=0)
     ap.add_argument('--lambda_bwd_rec', type=float, default=1)
-    ap.add_argument('--lambda_bwd_mmd', type=float, default=500)
+    ap.add_argument('--lambda_bwd_mmd', type=float, default=0)
     ap.add_argument('--random_seed', type=int, default=0)
 
     ap.add_argument('-t', '--temp', type=float, default=0.8, help='temperature to sample latents')
@@ -87,6 +88,8 @@ if __name__ == '__main__':
         val_loader = get_loader(data, batch=15)
     elif args.operation == 'test':
         data = VideoAllDataset(args)
+    if args.suffix:
+        args.scene = f'{args.scene}_{args.suffix}'
     loader = get_loader(data, batch=args.batch_size)
     hr_img = data[0]['hr'].to('cuda')
     lr_img = data[0]['lr']
