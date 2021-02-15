@@ -1,10 +1,9 @@
 import torch, numpy as np
 
-def reconstruction(x, y):
+def reconstruction(x, y, eps=1e-12):
     # L2 loss
-    # return torch.nn.MSELoss(x, y)
-    batch = x.shape[0]
-    return torch.sum((x - y)**2) / batch
+    return torch.mean((x - y)**2)
+    # return torch.mean(torch.sqrt((x - y)**2 + eps))
 
 def mmd(x, y, rev=False):
     if rev:

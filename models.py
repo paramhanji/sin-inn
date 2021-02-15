@@ -164,7 +164,7 @@ class UnconditionalSRFlow():
                     logging.info(all_losses)
                     self.inn.train()
                     for l in all_losses:
-                        writer.add_scalar(f'Loss/{loss}', all_losses[l], e)
+                        writer.add_scalar(f'Loss/{l}', all_losses[l], e)
                 bar()
 
         writer.close()
