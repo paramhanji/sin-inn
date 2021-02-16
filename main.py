@@ -2,7 +2,7 @@ import os, torch, argparse, logging
 import imageio as io
 
 from data import *
-from models import UnconditionalSRFlow
+from models import SingleVideoINN
 
 data_root = '/local/scratch/pmh64/datasets/adobe240f'
 
@@ -12,6 +12,8 @@ def get_args():
     ap.add_argument('-d', '--debug', action="store_const", dest="loglevel",
                     const=logging.DEBUG, default=logging.WARNING)
     ap.add_argument('-v', '--verbose', action="store_const", dest="loglevel", const=logging.INFO)
+    ap.add_argument('-g', '--gpu_id', type=int, default=0,
+                    help='GPU id if multiple GPUs are present (check with nvidia-smi)')
 
     # Dataset opts
     ap.add_argument('--dataset', default='datasets/adobe240f',
@@ -28,6 +30,8 @@ def get_args():
                     22x40 input-frame resolution use 6 for training and 40 for inference')
 
     # Architecture opts
+    ap.add_argument('-a', '--architecture', choices=['UncondSRFlow', 'InvRescaleNet'],
+                    default='UncondSRFlow')
     ap.add_argument('--scale', type=int, default=16,
                     help='difference in resolution between the 2 input streams')
     ap.add_argument('-c', '--num_coupling', type=int, default=2,
@@ -46,7 +50,7 @@ def get_args():
     # Training opts
     ap.add_argument('-l', '--learning_rate', type=float, default=1e-4,
                     help='initial learning rate')
-    ap.add_argument('-a', '--adam_betas', nargs=2, default=[0.9, 0.95])
+    ap.add_argument('--adam_betas', nargs=2, default=[0.9, 0.95])
     ap.add_argument('--lambda_fwd_rec', type=float, default=1)
     ap.add_argument('--lambda_fwd_mmd', type=float, default=0)
     ap.add_argument('--lambda_bwd_rec', type=float, default=1)
@@ -67,6 +71,7 @@ def get_args():
     args.z_dims = 16*16*3 - args.lr_dims
     logging.basicConfig(level=args.loglevel)
     torch.manual_seed(args.random_seed)
+    torch.cuda.set_device(args.gpu_id)
 
     assert args.scale % 4 == 0
     if args.operation == 'test':
@@ -88,19 +93,22 @@ if __name__ == '__main__':
         val_loader = get_loader(data, batch=15)
     elif args.operation == 'test':
         data = VideoAllDataset(args)
+    loader = get_loader(data, batch=args.batch_size)
+
+    # Modify the name for experiment
+    args.scene = f'{args.scene}_{args.architecture}'
     if args.suffix:
         args.scene = f'{args.scene}_{args.suffix}'
-    loader = get_loader(data, batch=args.batch_size)
+
     hr_img = data[0]['hr'].to('cuda')
     lr_img = data[0]['lr']
 
     # Define the model
-    inn = UnconditionalSRFlow(*hr_img.shape, args)
+    inn = SingleVideoINN(*hr_img.shape, args)
 
     # Figure out number of latent variables
     if args.loglevel == logging.DEBUG:
         out, _ = inn.infer([next(iter(loader))], args)
-        print(out.shape)
         latents = torch.randn(out[0,args.lr_dims:,:,:].shape)
         logging.debug(f'HR_dims: {hr_img.shape}')
         logging.debug(f'LR_dims: {lr_img.shape}')
