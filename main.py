@@ -41,8 +41,8 @@ def get_args():
     # Training log opts
     ap.add_argument('-w', '--working_dir', default='experiments',
                     help='directory to save logs and intermediate files')
-    ap.add_argument('-e', '--epochs', type=int, default=1000)
-    ap.add_argument('--save_iter', type=int, default=100,
+    ap.add_argument('-e', '--epochs', type=int, default=10000)
+    ap.add_argument('--save_iter', type=int, default=1000,
                     help='frequency of checkpointing (in terms of # of epochs)')
     ap.add_argument('-p', '--print_iter', type=int, default=10,
                     help='frequency of logging (in terms of # of epochs)')
@@ -53,6 +53,7 @@ def get_args():
     ap.add_argument('--adam_betas', nargs=2, default=[0.9, 0.95])
     ap.add_argument('--lambda_fwd_rec', type=float, default=1)
     ap.add_argument('--lambda_fwd_mmd', type=float, default=0)
+    ap.add_argument('--lambda_latent_nll', type=float, default=1)
     ap.add_argument('--lambda_bwd_rec', type=float, default=1)
     ap.add_argument('--lambda_bwd_mmd', type=float, default=0)
     ap.add_argument('--random_seed', type=int, default=0)

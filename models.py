@@ -84,6 +84,7 @@ class SingleVideoINN():
                                                   lr_z_hat[:,opt.lr_dims:,:,:]), dim=1)
                     loss_fwd = opt.lambda_fwd_rec * loss.reconstruction(lr_z_hat[:,:opt.lr_dims,:,:], lr)
                     loss_fwd += opt.lambda_fwd_mmd * loss.mmd(blocked_lr_z_hat, lr_z)
+                    loss_fwd += opt.lambda_latent_nll * loss.latent_nll(lr_z_hat[:,opt.lr_dims:,:,:])
                     loss_fwd.backward()
 
                     # Backward pass
@@ -120,7 +121,7 @@ class SingleVideoINN():
     def infer(self, loader, opt, rev=False, save_images=False, save_videos=False):
         self.inn.eval()
         trans = transforms.ToPILImage()
-        losses = dict.fromkeys(['fwd_rec','fwd_mmd','bwd_rec', 'bwd_mmd'], 0)
+        losses = dict.fromkeys(['fwd_rec','fwd_mmd','latent_nll','bwd_rec','bwd_mmd'], 0)
 
         
         if save_videos:
@@ -183,6 +184,7 @@ class SingleVideoINN():
                 else:
                     losses['fwd_rec'] += loss.reconstruction(output[:,:opt.lr_dims,:,:], lr)
                     losses['fwd_mmd'] += loss.mmd(output[:,:opt.lr_dims,:,:], lr)
+                    losses['latent_nll'] += loss.latent_nll(output[:,opt.lr_dims:,:,:])
 
                     if save_images or save_videos:
                         # Remove latents

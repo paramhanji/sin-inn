@@ -1,9 +1,10 @@
 import torch, numpy as np
 
-def reconstruction(x, y, eps=1e-12):
+def reconstruction(x, y, eps=1e-6):
     # L2 loss
-    return torch.mean((x - y)**2)
-    # return torch.mean(torch.sqrt((x - y)**2 + eps))
+    # return torch.mean((x - y)**2)
+    # Charbonnier penalty
+    return torch.mean(torch.sqrt((x - y)**2 + eps))
 
 def mmd(x, y, rev=False):
     if rev:
@@ -33,3 +34,6 @@ def mmd(x, y, rev=False):
         XY += C**a * ((C + dxy) / a)**-a
 
     return torch.mean(XX + YY - 2.*XY)
+
+def latent_nll(z):
+    return torch.mean(z**2)
