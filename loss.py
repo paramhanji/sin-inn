@@ -2,9 +2,9 @@ import torch, numpy as np
 
 def reconstruction(x, y, eps=1e-6):
     # L2 loss
-    # return torch.mean((x - y)**2)
+    return torch.mean((x - y)**2)
     # Charbonnier penalty
-    return torch.mean(torch.sqrt((x - y)**2 + eps))
+    # return torch.mean(torch.sqrt((x - y)**2 + eps))
 
 def mmd(x, y, rev=False):
     if rev:

@@ -18,7 +18,7 @@ def get_args():
     # Dataset opts
     ap.add_argument('--dataset', default='datasets/adobe240f',
                     help='root directory of dataset')
-    ap.add_argument('-s','--scene', default='GOPR9653',
+    ap.add_argument('-s','--scene', default='IMG_0028',
                     help='name of video from which files were extracted')
     ap.add_argument('--suffix', help='suffix for experiment name')
     ap.add_argument('-f', '--fps', type=int, default=10,
@@ -53,10 +53,15 @@ def get_args():
     ap.add_argument('--adam_betas', nargs=2, default=[0.9, 0.95])
     ap.add_argument('--lambda_fwd_rec', type=float, default=1)
     ap.add_argument('--lambda_fwd_mmd', type=float, default=0)
-    ap.add_argument('--lambda_latent_nll', type=float, default=1)
+    ap.add_argument('--lambda_latent_nll', type=float, default=0)
     ap.add_argument('--lambda_bwd_rec', type=float, default=1)
     ap.add_argument('--lambda_bwd_mmd', type=float, default=0)
     ap.add_argument('--random_seed', type=int, default=0)
+
+    # TCR opts
+    ap.add_argument('--lambda_bwd_tcr', type=float, default=1)
+    ap.add_argument('--rotation', type=float, default=5, help='in degrees')
+    ap.add_argument('--translation', type=float, default=5, help='in pixels')
 
     ap.add_argument('-t', '--temp', type=float, default=0.8, help='temperature to sample latents')
     ap.add_argument('--lr_dims', type=int, default=-1, help='internal: dimensionality of LR')
@@ -89,27 +94,23 @@ if __name__ == '__main__':
 
     # Create data loader
     if args.operation == 'train':
-        data = VideoTrainDataset(args)
-        val_data = VideoValDataset(args, 15)
-        val_loader = get_loader(data, batch=15)
-    elif args.operation == 'test':
-        data = VideoAllDataset(args)
-    loader = get_loader(data, batch=args.batch_size)
+        train_loader = get_loader(VideoTrainDataset(args), batch=args.batch_size)
+        val_loader = get_loader(VideoValDataset(args, 15), batch=15)
+    test_loader = get_loader(VideoAllDataset(args), batch=args.batch_size)
 
     # Modify the name for experiment
     args.scene = f'{args.scene}_{args.architecture}'
     if args.suffix:
         args.scene = f'{args.scene}_{args.suffix}'
 
-    hr_img = data[0]['hr'].to('cuda')
-    lr_img = data[0]['lr']
+    hr_img, lr_img = (b[0] for b in next(iter(test_loader)).values())
 
     # Define the model
     inn = SingleVideoINN(*hr_img.shape, args)
 
     # Figure out number of latent variables
     if args.loglevel == logging.DEBUG:
-        out, _ = inn.infer([next(iter(loader))], args)
+        out, _ = inn.infer([next(iter(test_loader))], args)
         latents = torch.randn(out[0,args.lr_dims:,:,:].shape)
         logging.debug(f'HR_dims: {hr_img.shape}')
         logging.debug(f'LR_dims: {lr_img.shape}')
@@ -117,7 +118,7 @@ if __name__ == '__main__':
         assert lr_img.numel() + latents.numel() == hr_img.numel()
 
     if args.operation == 'train':
-        inn.bidirectional_train(loader, val_loader, args)
+        inn.bidirectional_train(train_loader, val_loader, test_loader, args)
     elif args.operation == 'test':
         # args.temp = 0.01    # remove this after comparing with previous results
-        inn.infer(loader, args, rev=True, save_videos=True)
+        inn.infer(test_loader, args, rev=True, save_videos=True)

@@ -9,6 +9,7 @@ import torchvision.transforms as transforms
 from torch.utils.tensorboard import SummaryWriter
 
 import loss
+from tcr import TCR
 
 class SingleVideoINN():
     def __init__(self, c, h, w, opt):
@@ -26,6 +27,7 @@ class SingleVideoINN():
         logging.info(f'Loaded model with {params} parameters to GPU {opt.gpu_id}')
         
         if opt.operation == 'train':
+            self.tcr = TCR(opt.rotation, opt.translation)
             params_trainable = list(filter(lambda p: p.requires_grad, self.inn.parameters()))
 
             # TODO: initalise params, adam opts, weight decay
@@ -42,7 +44,7 @@ class SingleVideoINN():
                 self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
                 self.epoch_start = checkpoint['epoch']
 
-    def bidirectional_train(self, train_loader, val_loader, opt):
+    def bidirectional_train(self, sup_loader, val_loader, unsup_loader, opt):
         """
         Start with forward pass (HR->LR) and compute reconstruction + likelihood + MMD loss.
         Then reverse pass (LR->HR) and compute reconstruction + MMD loss.
@@ -62,28 +64,23 @@ class SingleVideoINN():
         self.inn.train()
         with alive_bar(opt.epochs - self.epoch_start) as bar:
             for e in range(self.epoch_start, opt.epochs):
-                for batch in train_loader:
+                for sup_batch, unsup_batch in zip(sup_loader, unsup_loader):
                     ''' TODO:
                     1. Perturb with gaussian noise
-                    2. Backward MMD might need to be ramped up
-                    3. Can model be trained without backward rec loss?
-                    4. Hyperparameters (lambdas)
+                    2. Hyperparameters (lambdas)
                     '''
                     self.optimizer.zero_grad()
-                    b, _, h, w = batch['lr'].shape
+                    b, _, h, w = sup_batch['lr'].shape
+                    unsup_batch = {'lr': unsup_batch['lr'][:b], 'hr': unsup_batch['hr'][:b]}
 
-
-                    hr = Variable(batch['hr']).to('cuda')
-                    lr = batch['lr'].to('cuda')
+                    hr, lr = (sup_batch[k].to('cuda') for k in ('hr', 'lr'))
                     z = torch.randn(b, opt.z_dims, h, w).to('cuda')
-                    lr_z = Variable(torch.cat((lr, z), dim=1))
+                    lr_z = torch.cat((lr, z), dim=1)
 
                     # Forward pass
                     lr_z_hat = self.inn(hr)
-                    blocked_lr_z_hat = torch.cat((lr_z_hat[:,:opt.lr_dims,:,:].data,
-                                                  lr_z_hat[:,opt.lr_dims:,:,:]), dim=1)
                     loss_fwd = opt.lambda_fwd_rec * loss.reconstruction(lr_z_hat[:,:opt.lr_dims,:,:], lr)
-                    loss_fwd += opt.lambda_fwd_mmd * loss.mmd(blocked_lr_z_hat, lr_z)
+                    loss_fwd += opt.lambda_fwd_mmd * loss.mmd(lr_z_hat, lr_z)
                     loss_fwd += opt.lambda_latent_nll * loss.latent_nll(lr_z_hat[:,opt.lr_dims:,:,:])
                     loss_fwd.backward()
 
@@ -93,6 +90,23 @@ class SingleVideoINN():
                     loss_bwd = opt.lambda_bwd_rec * loss.reconstruction(hr_hat, hr)
                     loss_bwd += opt.lambda_bwd_mmd * loss.mmd(hr_hat, hr, rev=True)
                     loss_bwd.backward()
+
+                    # TCR
+                    # Latents do not need tcr. Should we resample z?
+                    # Apply in backward pass to unseen LR in unsupervised manner
+                    # (Create a separate loader for LR without HR)
+                    # https://github.com/aamir-mustafa/Transformation-CR/blob/master/train_tcr.py
+                    # TODO: Apply to provided HR?
+                    rand = torch.rand(b, 3)
+                    hr, lr = (unsup_batch[k].to('cuda') for k in ('hr', 'lr'))
+                    # z = torch.randn(b, opt.z_dims, h, w).to('cuda')
+                    lr_z = torch.cat((lr, z), dim=1)
+
+                    tcr_lr_z = torch.cat((self.tcr(lr, rand, scale=1/opt.scale), z), dim=1)
+                    tcr_hr_hat = self.inn(tcr_lr_z, rev=True)
+                    hr_hat_tcr = self.tcr(self.inn(lr_z, rev=True), rand)
+                    loss_unsup = opt.lambda_bwd_tcr * loss.reconstruction(tcr_hr_hat, hr_hat_tcr)
+                    loss_unsup.backward()
 
                     self.optimizer.step()
 
