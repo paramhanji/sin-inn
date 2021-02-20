@@ -94,8 +94,9 @@ if __name__ == '__main__':
 
     # Create data loader
     if args.operation == 'train':
-        train_loader = get_loader(VideoTrainDataset(args), batch=args.batch_size)
-        val_loader = get_loader(VideoValDataset(args, 15), batch=15)
+        train_data = VideoTrainDataset(args)
+        train_loader = get_loader(train_data, batch=args.batch_size)
+        val_loader = get_loader(VideoValDataset(args, len(train_data)*4//6), batch=40)
     test_loader = get_loader(VideoAllDataset(args), batch=args.batch_size)
 
     # Modify the name for experiment
@@ -119,6 +120,5 @@ if __name__ == '__main__':
 
     if args.operation == 'train':
         inn.bidirectional_train(train_loader, val_loader, test_loader, args)
-    elif args.operation == 'test':
-        # args.temp = 0.01    # remove this after comparing with previous results
-        inn.infer(test_loader, args, rev=True, save_videos=True)
+    else:
+        inn.infer(test_loader, args, rev=True, save_images=True)

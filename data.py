@@ -63,7 +63,10 @@ All LR windows to be used during HR generation (post-training).
 class VideoAllDataset(VideoDataset):
     def __init__(self, opt, transform=None):
         super(VideoAllDataset, self).__init__(opt, transform)
-        self.shuffle = False
+        if opt.operation == 'train':
+            self.shuffle = True
+        else:
+            self.shuffle = False
 
     def populate_files(self, lr_dir, hr_dir, num_lr, opt):
         for i in range(1 + opt.fps, num_lr - opt.fps):
@@ -85,11 +88,12 @@ class VideoValDataset(VideoDataset):
         for i in torch.randperm(num_lr - 2*opt.lr_window):
             i += opt.lr_window
             # Skip images from train set
-            if (i + opt.fps) % (120 // opt.fps) == 0:
+            if (i + opt.fps + 3) % (120 // opt.fps) == 0:
                 continue
             self.lr_files.append([os.path.join(lr_dir, f'frame_{x:05d}.png')
                                 for x in range(i - opt.lr_window, i + opt.lr_window + 1)])
             self.hr_files.append(os.path.join(hr_dir, f'frame_{i:05d}.png'))
+            num += 1
             if num == self.k:
                 break
 

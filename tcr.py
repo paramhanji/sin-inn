@@ -15,7 +15,7 @@ class TCR(nn.Module):
     def __init__(self, angle, trans):
         super(TCR, self).__init__()
 
-        self.ang = np.deg2rad(angle)
+        self.ang = angle
         self.ang_neg = -1*self.ang
         self.max_tx, self.max_ty = trans, trans
         self.min_tx, self.min_ty = -trans, -trans

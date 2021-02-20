@@ -102,7 +102,7 @@ class SingleVideoINN():
                     # z = torch.randn(b, opt.z_dims, h, w).to('cuda')
                     lr_z = torch.cat((lr, z), dim=1)
 
-                    tcr_lr_z = torch.cat((self.tcr(lr, rand, scale=1/opt.scale), z), dim=1)
+                    tcr_lr_z = torch.cat((self.tcr(lr, rand, scale=opt.scale), z), dim=1)
                     tcr_hr_hat = self.inn(tcr_lr_z, rev=True)
                     hr_hat_tcr = self.tcr(self.inn(lr_z, rev=True), rand)
                     loss_unsup = opt.lambda_bwd_tcr * loss.reconstruction(tcr_hr_hat, hr_hat_tcr)
