@@ -23,8 +23,8 @@ class SingleVideoINN():
         assert self.inn is not None, f'Architecture not defined'
         logging.debug(self.inn)
 
-        params = sum(p.numel() for p in self.inn.parameters())
-        logging.info(f'Loaded model with {params} parameters to GPU {opt.gpu_id}')
+        params = sum(p.numel() for p in self.inn.parameters())/1e6
+        logging.info(f'Loaded model with {params:.2f}M parameters to GPU {opt.gpu_id}')
         
         if opt.operation == 'train':
             self.tcr = TCR(opt.rotation, opt.translation)
@@ -38,7 +38,7 @@ class SingleVideoINN():
             self.epoch_start = 0
 
         if opt.resume_state:
-            checkpoint = torch.load(opt.resume_state)
+            checkpoint = torch.load(opt.resume_state, map_location=f'cuda:{opt.gpu_id}')
             self.inn.load_state_dict(checkpoint['model_state_dict'])
             if opt.operation == 'train':
                 self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
@@ -53,7 +53,7 @@ class SingleVideoINN():
         """
 
         # # Archive experiment dir if it exists
-        exp_dir = os.path.join(opt.working_dir, opt.operation, f'{opt.scene}_{opt.fps}')
+        exp_dir = os.path.join(opt.working_dir, opt.operation, opt.scene)
         if os.path.isdir(exp_dir) and not opt.resume_state:
             from datetime import datetime
             os.rename(exp_dir, f'{exp_dir}_{datetime.now()}')
@@ -140,21 +140,22 @@ class SingleVideoINN():
         
         if save_videos:
             save_path = os.path.join(opt.working_dir, opt.operation,
-                                     f'{opt.scene}_{opt.fps}_{os.path.basename(opt.resume_state).strip(".pth")}',
+                                     f'{opt.scene}_{os.path.basename(opt.resume_state).strip(".pth")}',
                                      'videos')
             if not os.path.isdir(save_path):
                 os.makedirs(save_path)
 
             # Create subprocess pipes to feed ffmpeg
             dump = open(os.devnull, 'w')
-            video_in = sp.Popen(['ffmpeg', '-framerate', '120', '-i', '-', '-vf', 'scale=iw*16:ih*16',
+            video_in = sp.Popen(['ffmpeg', '-framerate', '30', '-i', '-', '-vf',
+                                 f'scale=iw*{opt.scale}:ih*{opt.scale}',
                                  '-c:v', 'libx264', '-preset', 'ultrafast', '-y',
                                  os.path.join(save_path, 'in.avi')],
                                 stdin=sp.PIPE, stderr=dump)
-            video_out = sp.Popen(['ffmpeg', '-framerate', '120', '-i', '-', '-c:v', 'libx264',
+            video_out = sp.Popen(['ffmpeg', '-framerate', '30', '-i', '-', '-c:v', 'libx264',
                                   '-preset', 'ultrafast', '-y', os.path.join(save_path, 'out.avi')],
                                   stdin=sp.PIPE, stderr=dump)
-            video_gt = sp.Popen(['ffmpeg', '-framerate', '120', '-i', '-', '-c:v', 'libx264',
+            video_gt = sp.Popen(['ffmpeg', '-framerate', '30', '-i', '-', '-c:v', 'libx264',
                                  '-preset', 'ultrafast', '-y', os.path.join(save_path, 'gt.avi')],
                                 stdin=sp.PIPE, stderr=dump)
 
@@ -214,7 +215,7 @@ class SingleVideoINN():
 
                 if save_images:
                     save_path = os.path.join(opt.working_dir, opt.operation,
-                                             f'{opt.scene}_{opt.fps}_{os.path.basename(opt.resume_state).strip(".pth")}',
+                                             f'{opt.scene}_{os.path.basename(opt.resume_state).strip(".pth")}',
                                              'frames')
                     if not os.path.isdir(save_path):
                         os.makedirs(save_path)

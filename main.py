@@ -41,7 +41,7 @@ def get_args():
     # Training log opts
     ap.add_argument('-w', '--working_dir', default='experiments',
                     help='directory to save logs and intermediate files')
-    ap.add_argument('-e', '--epochs', type=int, default=10000)
+    ap.add_argument('-e', '--epochs', type=int, default=5000)
     ap.add_argument('--save_iter', type=int, default=1000,
                     help='frequency of checkpointing (in terms of # of epochs)')
     ap.add_argument('-p', '--print_iter', type=int, default=10,
@@ -50,7 +50,7 @@ def get_args():
     # Training opts
     ap.add_argument('-l', '--learning_rate', type=float, default=1e-4,
                     help='initial learning rate')
-    ap.add_argument('--adam_betas', nargs=2, default=[0.9, 0.95])
+    ap.add_argument('--adam_betas', nargs=2, default=[0.9, 0.99])
     ap.add_argument('--lambda_fwd_rec', type=float, default=1)
     ap.add_argument('--lambda_fwd_mmd', type=float, default=0)
     ap.add_argument('--lambda_latent_nll', type=float, default=0)
@@ -72,9 +72,9 @@ def get_args():
     #                 help='noise added to input to stabilise training')
     
     args = ap.parse_args()
-    # Assuming 16x SR, 16*16*h*w*3 == lr_dims*h*w + z_dims*h*w
+    # Assuming "s" times SR, s*s*h*w*3 == lr_dims*h*w + z_dims*h*w
     args.lr_dims = (2*args.lr_window + 1)*3
-    args.z_dims = 16*16*3 - args.lr_dims
+    args.z_dims = args.scale*args.scale*3 - args.lr_dims
     logging.basicConfig(level=args.loglevel)
     torch.manual_seed(args.random_seed)
     torch.cuda.set_device(args.gpu_id)

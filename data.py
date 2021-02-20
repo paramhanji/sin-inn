@@ -81,10 +81,30 @@ class VideoValDataset(VideoDataset):
         self.shuffle = False
 
     def populate_files(self, lr_dir, hr_dir, num_lr, opt):
-        for i in range(1 + opt.fps, num_lr - opt.fps, (num_lr + 1)//self.k):
+        num = 0
+        for i in torch.randperm(num_lr - 2*opt.lr_window):
+            i += opt.lr_window
+            # Skip images from train set
+            if (i + opt.fps) % (120 // opt.fps) == 0:
+                continue
             self.lr_files.append([os.path.join(lr_dir, f'frame_{x:05d}.png')
                                 for x in range(i - opt.lr_window, i + opt.lr_window + 1)])
             self.hr_files.append(os.path.join(hr_dir, f'frame_{i:05d}.png'))
+            if num == self.k:
+                break
+
+'''
+Wrap supervised and unsupervised datasets into single class
+'''
+class ConcatDataset(Dataset):
+    def __init__(self, *datasets):
+        self.datasets = datasets
+
+    def __getitem__(self, i):
+        return tuple(d[i] for d in self.datasets)
+
+    def __len__(self):
+        return min(len(d) for d in self.datasets)
 
 
 def get_loader(dataset, batch=4):

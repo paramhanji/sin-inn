@@ -52,6 +52,7 @@ class UncondSRFlow():
                     subnet = subnet_conv
                 else:
                     subnet = subnet_conv_1x1
+                # subnet = DenseBlock
                 self.nodes.append(Ff.Node(self.nodes[-1],
                                           Fm.GLOWCouplingBlock,
                                           {'subnet_constructor':subnet, 'clamp':1.2},
