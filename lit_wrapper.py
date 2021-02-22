@@ -8,17 +8,14 @@ from tcr import TCR
 
 class SingleVideoINN(pl.LightningModule):
 
-    def __init__(self, c, h, w, train_data, val_data, test_data, opt):
+    def __init__(self, c, h, w, opt):
         super().__init__()
         self.opt = opt
-        self.train_data = train_data
-        self.val_data = val_data
-        self.test_data = test_data
         self.inn = None
         for arch in ('UncondSRFlow', 'InvRescaleNet'):
             if opt.architecture == arch:
                 arch_module = pydoc.locate(f'archs.{arch}')
-                self.inn = arch_module(c, h, w, opt).to('cuda')
+                self.inn = arch_module(c, h, w, opt)
         assert self.inn is not None, f'Architecture not defined'
         logging.debug(self.inn)
 
@@ -26,6 +23,9 @@ class SingleVideoINN(pl.LightningModule):
         logging.info(f'Loaded model with {params} parameters to GPUs {opt.gpu_ids}')
 
         self.tcr = TCR(opt.rotation, opt.translation)
+
+        # Disable automatic optimization - needed since we use multiple backward() calls
+        self.automatic_optimization = False
 
     def training_step(self, batch, batch_idx):
         """
@@ -42,15 +42,18 @@ class SingleVideoINN(pl.LightningModule):
 
         # Forward pass
         lr_z_hat = self.inn(hr)
-        total_loss = self.opt.lambda_fwd_rec * loss.reconstruction(lr_z_hat[:,:self.opt.lr_dims,:,:], lr)
-        total_loss += self.opt.lambda_fwd_mmd * loss.mmd(lr_z_hat, lr_z)
-        total_loss += self.opt.lambda_latent_nll * loss.latent_nll(lr_z_hat[:,self.opt.lr_dims:,:,:])
+        fwd_loss = self.opt.lambda_fwd_rec * loss.reconstruction(lr_z_hat[:,:self.opt.lr_dims,:,:], lr)
+        fwd_loss += self.opt.lambda_fwd_mmd * loss.mmd(lr_z_hat, lr_z)
+        fwd_loss += self.opt.lambda_latent_nll * loss.latent_nll(lr_z_hat[:,self.opt.lr_dims:,:,:])
+        self.manual_backward(fwd_loss)
 
+        torch.cuda.empty_cache()
         # Backward pass
         # TODO: perturb lr_hat, retain z and compute reconstruction loss
         hr_hat = self.inn(lr_z, rev=True)
-        total_loss += self.opt.lambda_bwd_rec * loss.reconstruction(hr_hat, hr)
-        total_loss += self.opt.lambda_bwd_mmd * loss.mmd(hr_hat, hr, rev=True)
+        bwd_loss = self.opt.lambda_bwd_rec * loss.reconstruction(hr_hat, hr)
+        bwd_loss += self.opt.lambda_bwd_mmd * loss.mmd(hr_hat, hr, rev=True)
+        self.manual_backward(bwd_loss)
 
         # TCR
         # Latents do not need tcr. Should we resample z?
@@ -66,7 +69,8 @@ class SingleVideoINN(pl.LightningModule):
         tcr_lr_z = torch.cat((self.tcr(lr, rand, scale=1/self.opt.scale), z), dim=1)
         tcr_hr_hat = self.inn(tcr_lr_z, rev=True)
         hr_hat_tcr = self.tcr(self.inn(lr_z, rev=True), rand)
-        total_loss += self.opt.lambda_bwd_tcr * loss.reconstruction(tcr_hr_hat, hr_hat_tcr)
+        tcr_loss = self.opt.lambda_bwd_tcr * loss.reconstruction(tcr_hr_hat, hr_hat_tcr)
+        self.manual_backward(tcr_loss)
 
         # self.log(total_loss)
         return total_loss
@@ -85,19 +89,6 @@ class SingleVideoINN(pl.LightningModule):
         self.log_dict(losses)
 
     # TODO: forward
-
-
-    def train_dataloader(self):
-        return DataLoader(self.train_data, batch_size=self.opt.batch_size,
-                          shuffle=True, num_workers=4)
-
-    def val_dataloader(self):
-        return DataLoader(self.val_data, batch_size=self.opt.batch_size,
-                          shuffle=False, num_workers=4)
-
-    def test_dataloader(self):
-        return DataLoader(self.test_data, batch_size=self.opt.batch_size,
-                          shuffle=False, num_workers=4)
 
     def configure_optimizers(self):
         # TODO: initalise params, adam opts, weight decay

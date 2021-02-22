@@ -96,7 +96,7 @@ if __name__ == '__main__':
     if args.operation == 'train':
         train_data = VideoTrainDataset(args)
         train_loader = get_loader(train_data, batch=args.batch_size)
-        val_loader = get_loader(VideoValDataset(args, len(train_data)*4//6), batch=40)
+        val_loader = get_loader(VideoValDataset(args, len(train_data)*4//6), batch=20)
     test_loader = get_loader(VideoAllDataset(args), batch=args.batch_size)
 
     # Modify the name for experiment

@@ -39,7 +39,7 @@ class TCR(nn.Module):
         T[:,0,2] += tx
         T[:,1,2] += ty
 
-        transformed = kornia.warp_affine(img, T.to('cuda'), dsize=(h, w))
+        transformed = kornia.warp_affine(img, T, dsize=(h, w))
 
         return transformed    
     

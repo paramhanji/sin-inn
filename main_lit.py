@@ -94,16 +94,17 @@ if __name__ == '__main__':
     # Create datasets
     sup_data = VideoTrainDataset(args)
     unsup_data = VideoAllDataset(args)
+    # TODO: shuffle unsup data
     train_data = ConcatDataset(sup_data, unsup_data)
     val_data = VideoValDataset(args, len(train_data)*4//6)      # 60-40 train-test ratio
     loader = get_loader(unsup_data)
     hr_img, lr_img = (b[0] for b in next(iter(loader)).values())
 
-    model = SingleVideoINN(*hr_img.shape, train_data, val_data, unsup_data, args)
+    model = SingleVideoINN(*hr_img.shape, args)
 
     if args.operation == 'train':
-        exp_dir = os.path.join(args.working_dir, args.operation, f'{args.scene}_{args.architecture}')
-        wandb_logger = WandbLogger(project='sin-inn')
+        exp_dir = os.path.join(args.working_dir, args.operation, f'{args.scene}_{args.architecture}_{args.suffix}')
+        wandb_logger = WandbLogger(project='sin-inn', name=f'{args.scene}_{args.architecture}_{args.suffix}')
         trainer = Trainer(auto_lr_find=True,
                           auto_scale_batch_size=True,
                           check_val_every_n_epoch=10,
@@ -111,10 +112,7 @@ if __name__ == '__main__':
                           gpus=args.gpu_ids,
                           logger=wandb_logger,
                           max_epochs=args.epochs,
-                          precision=16,
-                          resume_from_checkpoint=exp_dir,
-                          callbacks=[ModelCheckpoint(period=args.save_iter)])
-        trainer.fit(model)
-
-    # if args.suffix:
-    #     args.scene = f'{args.scene}_{args.suffix}'
+                          callbacks=[ModelCheckpoint(period=args.save_iter,
+                          							 dirpath=exp_dir)])
+        loader = LitLoader(train_data, val_data, args.batch_size)
+        trainer.fit(model, loader)

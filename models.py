@@ -74,7 +74,7 @@ class SingleVideoINN():
                     unsup_batch = {'lr': unsup_batch['lr'][:b], 'hr': unsup_batch['hr'][:b]}
 
                     hr, lr = (sup_batch[k].to('cuda') for k in ('hr', 'lr'))
-                    z = torch.randn(b, opt.z_dims, h, w).to('cuda')
+                    z = torch.randn(b, opt.z_dims, h, w, device=hr.device)
                     lr_z = torch.cat((lr, z), dim=1)
 
                     # Forward pass
@@ -178,7 +178,7 @@ class SingleVideoINN():
                             imgs_in.append(col)
 
                     # Sample from latents
-                    z = opt.temp * torch.randn(b, opt.z_dims, h, w).to('cuda')
+                    z = opt.temp * torch.randn(b, opt.z_dims, h, w, device=hr.device)
                     input = torch.cat((lr, z), dim=1)
                 else:
                     input = hr
@@ -186,7 +186,6 @@ class SingleVideoINN():
 
                 # The forward/backward pass
                 with torch.no_grad():
-                    input = input.to('cuda')
                     output = self.inn.forward(input, rev=rev)
 
                 if rev:

@@ -3,6 +3,7 @@ import numpy as np, torch
 import imageio as io
 from torch.utils.data.dataset import Dataset
 from torch.utils.data import DataLoader
+import pytorch_lightning as pl
 
 '''
 Base class for single video dataset
@@ -99,6 +100,7 @@ class VideoValDataset(VideoDataset):
 
 '''
 Wrap supervised and unsupervised datasets into single class
+TODO: Update to independently sample from entire database
 '''
 class ConcatDataset(Dataset):
     def __init__(self, *datasets):
@@ -113,3 +115,22 @@ class ConcatDataset(Dataset):
 
 def get_loader(dataset, batch=4):
     return DataLoader(dataset, batch_size=batch, shuffle=dataset.shuffle, num_workers=4)
+
+
+class LitLoader(pl.LightningDataModule):
+
+    def __init__(self,  train_data, val_data, batch=4):
+        super().__init__()
+        self.batch = batch
+        self.train_data = train_data
+        self.val_data = val_data
+
+    # def setup(self, stage=None):
+    #     self.train_set = DatasetFromHdf5(self.path_to_train_data)
+    #     self.valid_set = DatasetFromHdf5(self.path_to_validation_data)
+    
+    def train_dataloader(self):
+        return DataLoader(dataset=self.train_data, batch_size=self.batch, shuffle=True, num_workers=4)
+
+    def val_dataloader(self):
+        return DataLoader(dataset=self.val_data, batch_size=20, shuffle=False)
