@@ -97,7 +97,7 @@ class SingleVideoINN():
                     # (Create a separate loader for LR without HR)
                     # https://github.com/aamir-mustafa/Transformation-CR/blob/master/train_tcr.py
                     # TODO: Apply to provided HR?
-                    rand = torch.rand(b, 3)
+                    rand = torch.rand(b, 3, device=hr.device)
                     hr, lr = (unsup_batch[k].to('cuda') for k in ('hr', 'lr'))
                     # z = torch.randn(b, opt.z_dims, h, w).to('cuda')
                     lr_z = torch.cat((lr, z), dim=1)

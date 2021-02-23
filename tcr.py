@@ -25,12 +25,13 @@ class TCR(nn.Module):
         
     def forward(self, img, random, scale=1):
         b, c, h, w = img.shape
+        dev = img.device
 
         # Rotation
-        center = torch.Tensor([w/2, h/2]).unsqueeze(0)
+        center = torch.cuda.FloatTensor([w/2, h/2]).unsqueeze(0).to(dev)
         center = center.repeat(b, 1)
         angle = ((self.ang - self.ang_neg)*random[:,0]  + self.ang_neg)
-        zoom = torch.ones(b, 2)
+        zoom = torch.ones(b, 2, device=dev)
         T = kornia.get_rotation_matrix2d(center, angle, zoom)
 
         # Translation

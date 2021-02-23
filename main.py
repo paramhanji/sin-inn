@@ -121,4 +121,4 @@ if __name__ == '__main__':
     if args.operation == 'train':
         inn.bidirectional_train(train_loader, val_loader, test_loader, args)
     else:
-        inn.infer(test_loader, args, rev=True, save_images=True)
+        inn.infer(test_loader, args, rev=True, save_videos=True)
