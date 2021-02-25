@@ -71,7 +71,6 @@ class SingleVideoINN():
                     '''
                     self.optimizer.zero_grad()
                     b, _, h, w = sup_batch['lr'].shape
-                    unsup_batch = {'lr': unsup_batch['lr'][:b], 'hr': unsup_batch['hr'][:b]}
 
                     hr, lr = (sup_batch[k].to('cuda') for k in ('hr', 'lr'))
                     z = torch.randn(b, opt.z_dims, h, w, device=hr.device)
@@ -97,16 +96,17 @@ class SingleVideoINN():
                     # (Create a separate loader for LR without HR)
                     # https://github.com/aamir-mustafa/Transformation-CR/blob/master/train_tcr.py
                     # TODO: Apply to provided HR?
-                    rand = torch.rand(b, 3, device=hr.device)
-                    hr, lr = (unsup_batch[k].to('cuda') for k in ('hr', 'lr'))
-                    # z = torch.randn(b, opt.z_dims, h, w).to('cuda')
-                    lr_z = torch.cat((lr, z), dim=1)
+                    # rand = torch.rand(b, 3, device=hr.device)
+                    # unsup_batch = {'lr': unsup_batch['lr'][:b], 'hr': unsup_batch['hr'][:b]}
+                    # hr, lr = (unsup_batch[k].to('cuda') for k in ('hr', 'lr'))
+                    # # z = torch.randn(b, opt.z_dims, h, w).to('cuda')
+                    # lr_z = torch.cat((lr, z), dim=1)
 
-                    tcr_lr_z = torch.cat((self.tcr(lr, rand, scale=opt.scale), z), dim=1)
-                    tcr_hr_hat = self.inn(tcr_lr_z, rev=True)
-                    hr_hat_tcr = self.tcr(self.inn(lr_z, rev=True), rand)
-                    loss_unsup = opt.lambda_bwd_tcr * loss.reconstruction(tcr_hr_hat, hr_hat_tcr)
-                    loss_unsup.backward()
+                    # tcr_lr_z = torch.cat((self.tcr(lr, rand, scale=opt.scale), z), dim=1)
+                    # tcr_hr_hat = self.inn(tcr_lr_z, rev=True)
+                    # hr_hat_tcr = self.tcr(self.inn(lr_z, rev=True), rand)
+                    # loss_unsup = opt.lambda_bwd_tcr * loss.reconstruction(tcr_hr_hat, hr_hat_tcr)
+                    # loss_unsup.backward()
 
                     self.optimizer.step()
 
@@ -147,16 +147,20 @@ class SingleVideoINN():
 
             # Create subprocess pipes to feed ffmpeg
             dump = open(os.devnull, 'w')
-            video_in = sp.Popen(['ffmpeg', '-framerate', '30', '-i', '-', '-vf',
-                                 f'scale=iw*{opt.scale}:ih*{opt.scale}',
-                                 '-c:v', 'libx264', '-preset', 'ultrafast', '-y',
+            fps = '30'
+            crf = '18'
+            video_in = sp.Popen(['ffmpeg', '-framerate', fps, '-i', '-',
+                                 '-vf', f'scale=iw*{opt.scale}:ih*{opt.scale}',
+                                 '-c:v', 'libx264', '-preset', 'veryslow', '-crf', crf, '-y',
                                  os.path.join(save_path, 'in.avi')],
                                 stdin=sp.PIPE, stderr=dump)
-            video_out = sp.Popen(['ffmpeg', '-framerate', '30', '-i', '-', '-c:v', 'libx264',
-                                  '-preset', 'ultrafast', '-y', os.path.join(save_path, 'out.avi')],
-                                  stdin=sp.PIPE, stderr=dump)
-            video_gt = sp.Popen(['ffmpeg', '-framerate', '30', '-i', '-', '-c:v', 'libx264',
-                                 '-preset', 'ultrafast', '-y', os.path.join(save_path, 'gt.avi')],
+            video_out = sp.Popen(['ffmpeg', '-framerate', fps, '-i', '-',
+                                  '-c:v', 'libx264', '-preset', 'veryslow', '-crf', crf, '-y',
+                                  os.path.join(save_path, 'out.avi')],
+                                 stdin=sp.PIPE, stderr=dump)
+            video_gt = sp.Popen(['ffmpeg', '-framerate', fps, '-i', '-',
+                                 '-c:v', 'libx264', '-preset', 'veryslow', '-crf', crf, '-y',
+                                 os.path.join(save_path, 'gt.avi')],
                                 stdin=sp.PIPE, stderr=dump)
 
         with alive_bar(len(loader)) as bar:
