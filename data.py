@@ -34,10 +34,10 @@ class VideoDataset(Dataset):
 
         lr_imgs_np = np.concatenate([io.imread(f) for f in self.lr_files[idx]],
                                     axis=-1).transpose(-1, 0, 1)
-        lr_images = torch.FloatTensor(lr_imgs_np)  / 255.
-        hr_image = torch.FloatTensor(io.imread(self.hr_files[idx]).transpose(-1, 0, 1)) / 255.
+        lr_imgs = torch.FloatTensor(lr_imgs_np) / 255.
+        hr_img = torch.FloatTensor(io.imread(self.hr_files[idx]).transpose(-1, 0, 1)) / 255.
 
-        sample = {'hr': hr_image, 'lr': lr_images}
+        sample = {'hr': hr_img, 'lr': lr_imgs}
 
         if self.transform:
             sample = self.transform(sample)
@@ -125,12 +125,8 @@ class LitLoader(pl.LightningDataModule):
         self.train_data = train_data
         self.val_data = val_data
 
-    # def setup(self, stage=None):
-    #     self.train_set = DatasetFromHdf5(self.path_to_train_data)
-    #     self.valid_set = DatasetFromHdf5(self.path_to_validation_data)
-    
     def train_dataloader(self):
         return DataLoader(dataset=self.train_data, batch_size=self.batch, shuffle=True, num_workers=4)
 
     def val_dataloader(self):
-        return DataLoader(dataset=self.val_data, batch_size=20, shuffle=False)
+        return DataLoader(dataset=self.val_data, batch_size=20, shuffle=False, num_workers=4)
