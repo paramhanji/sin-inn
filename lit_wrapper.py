@@ -1,22 +1,17 @@
-import pydoc, logging
-import torch
-from torch.utils.data import DataLoader
-import pytorch_lightning as pl
+import logging
+import torch, pytorch_lightning as pl
 
-import loss
+from archs import UncondSRFlow, InvRescaleNet
 from tcr import TCR
+import loss
 
 class SingleVideoINN(pl.LightningModule):
 
     def __init__(self, c, h, w, opt):
         super().__init__()
+        arch_module = {'SRF': UncondSRFlow, 'IRN':InvRescaleNet}
         self.opt = opt
-        self.inn = None
-        for arch in ('UncondSRFlow', 'InvRescaleNet'):
-            if opt.architecture == arch:
-                arch_module = pydoc.locate(f'archs.{arch}')
-                self.inn = arch_module(c, h, w, opt)
-        assert self.inn is not None, f'Architecture not defined'
+        self.inn = arch_module[opt.architecture](c, h, w, opt)
         logging.debug(self.inn)
 
         params = sum(p.numel() for p in self.inn.parameters())
@@ -47,7 +42,6 @@ class SingleVideoINN(pl.LightningModule):
         fwd_loss += self.opt.lambda_latent_nll * loss.latent_nll(lr_z_hat[:,self.opt.lr_dims:,:,:])
         self.manual_backward(fwd_loss)
 
-        torch.cuda.empty_cache()
         # Backward pass
         # TODO: perturb lr_hat, retain z and compute reconstruction loss
         hr_hat = self.inn(lr_z, rev=True)
@@ -55,25 +49,26 @@ class SingleVideoINN(pl.LightningModule):
         bwd_loss += self.opt.lambda_bwd_mmd * loss.mmd(hr_hat, hr, rev=True)
         self.manual_backward(bwd_loss)
 
-        # TCR
-        # Latents do not need tcr. Should we resample z?
-        # Apply in backward pass to unseen LR in unsupervised manner
-        # (Create a separate loader for LR without HR)
-        # https://github.com/aamir-mustafa/Transformation-CR/blob/master/train_tcr.py
-        # TODO: Apply to provided HR?
-        rand = torch.rand(b, 3)
-        hr, lr = (batch[1][k] for k in ('hr', 'lr'))
-        # z = torch.randn(b, opt.z_dims, h, w).to('cuda')
-        lr_z = torch.cat((lr, z), dim=1)
+        if self.opt.lambda_bwd_tcr > 0:
+            # TCR - Apply in backward pass to unseen LR in unsupervised manner
+            # TODO: Apply to provided HR?
+            # TODO: Use a transformation with gradient
+            hr, lr = (batch[1][k] for k in ('hr', 'lr'))
+            for i in range(self.opt.tcr_iters):
+                rand = torch.rand(b, 3)
+                z = torch.randn(b, self.opt.z_dims, h, w, device=hr.device)
+                lr_z = torch.cat((lr, z), dim=1)
 
-        tcr_lr_z = torch.cat((self.tcr(lr, rand, scale=1/self.opt.scale), z), dim=1)
-        tcr_hr_hat = self.inn(tcr_lr_z, rev=True)
-        hr_hat_tcr = self.tcr(self.inn(lr_z, rev=True), rand)
-        tcr_loss = self.opt.lambda_bwd_tcr * loss.reconstruction(tcr_hr_hat, hr_hat_tcr)
-        self.manual_backward(tcr_loss)
+                tcr_lr_z = torch.cat((self.tcr(lr, rand, scale=1/self.opt.scale), z), dim=1)
+                tcr_hr_hat = self.inn(tcr_lr_z, rev=True)
+                hr_hat_tcr = self.tcr(self.inn(lr_z, rev=True), rand)
+                tcr_loss = self.opt.lambda_bwd_tcr / self.opt.tcr_iters * loss.reconstruction(tcr_hr_hat, hr_hat_tcr)
+                self.manual_backward(tcr_loss)
+        else:
+            tcr_loss = 0
 
-        # self.log(total_loss)
-        return total_loss
+        self.log('train', fwd_loss + bwd_loss + tcr_loss)
+        # return {'log': {'train': fwd_loss + bwd_loss + tcr_loss }}
 
     def validation_step(self, batch, batch_idx):
         b, _, h, w = batch['lr'].shape
@@ -83,10 +78,13 @@ class SingleVideoINN(pl.LightningModule):
 
         lr_z_hat = self.inn(hr)
         hr_hat = self.inn(lr_z, rev=True)
-        losses = {'lr_acc': loss.reconstruction(lr_z_hat[:,:self.opt.lr_dims,:,:], lr),
-                  'hr_acc': loss.reconstruction(hr_hat, hr),
-                  'z_nll': loss.latent_nll(lr_z_hat[:,self.opt.lr_dims:,:,:])}
-        self.log_dict(losses)
+        self.log('lr_acc', loss.reconstruction(lr_z_hat[:,:self.opt.lr_dims,:,:], lr))
+        self.log('hr_acc', loss.reconstruction(hr_hat, hr))
+        self.log('z_nll', loss.latent_nll(lr_z_hat[:,self.opt.lr_dims:,:,:]))
+        # metrics = {'lr_acc': loss.reconstruction(lr_z_hat[:,:self.opt.lr_dims,:,:], lr),
+        #            'hr_acc': loss.reconstruction(hr_hat, hr),
+        #            'z_nll': loss.latent_nll(lr_z_hat[:,self.opt.lr_dims:,:,:])}
+        # return {'log': metrics}
 
     # TODO: forward
 

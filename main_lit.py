@@ -20,23 +20,23 @@ def get_args():
     # Dataset opts
     ap.add_argument('--dataset', default='datasets/adobe240f',
                     help='root directory of dataset')
-    ap.add_argument('-s','--scene', default='IMG_0028',
+    ap.add_argument('-s','--scene', default='IMG_0028_binning_4x',
                     help='name of video from which files were extracted')
-    ap.add_argument('--suffix', help='suffix for experiment name')
+    ap.add_argument('--suffix', default='default', help='suffix for experiment name')
     ap.add_argument('-f', '--fps', type=int, default=10,
                     help='FPS of high-res frames (low-res frames are assumed to be 120fps)')
     ap.add_argument('--lr_window', type=int, default=10,
                     help='# of input low-res frames to use on either side of 1 high-res frame')
-    ap.add_argument('-b', '--batch_size', type=int, default=6,
+    ap.add_argument('-b', '--batch_size', type=int, default=8,
                     help='batch size to use; on 12GB 1080ti with default architecture and\
-                    22x40 input-frame resolution use 6 for training and 40 for inference')
+                    22x40 input-frame resolution use 8 for training and 40 for inference')
 
     # Architecture opts
-    ap.add_argument('-a', '--architecture', choices=['UncondSRFlow', 'InvRescaleNet'],
-                    default='UncondSRFlow')
-    ap.add_argument('--scale', type=int, default=16,
+    ap.add_argument('-a', '--architecture', choices=['SRF', 'IRN'],
+                    default='SRF')
+    ap.add_argument('--scale', type=int, default=4,
                     help='difference in resolution between the 2 input streams')
-    ap.add_argument('-c', '--num_coupling', type=int, default=2,
+    ap.add_argument('-c', '--num_coupling', type=int, default=8,
                     help='number of GLOW blocks between downsamples')
     ap.add_argument('-r', '--resume_state', help='checkpoint to resume training')
 
@@ -65,6 +65,7 @@ def get_args():
     ap.add_argument('--lambda_bwd_tcr', type=float, default=1)
     ap.add_argument('--rotation', type=float, default=5, help='in degrees')
     ap.add_argument('--translation', type=float, default=5, help='in pixels')
+    ap.add_argument('--tcr_iters', type=float, default=5, help='samples per image')
 
     ap.add_argument('-t', '--temp', type=float, default=0.8, help='temperature to sample latents')
     ap.add_argument('--lr_dims', type=int, default=-1, help='internal: dimensionality of LR')
@@ -75,12 +76,10 @@ def get_args():
     #                 help='noise added to input to stabilise training')
     
     args = ap.parse_args()
-    # Assuming 16x SR, 16*16*h*w*3 == lr_dims*h*w + z_dims*h*w
-    args.lr_dims = (2*args.lr_window + 1)*3
-    args.z_dims = 16*16*3 - args.lr_dims
+    args.lr_dims = (2*args.lr_window + 1)*4
+    args.z_dims = args.scale*args.scale*3*4 - args.lr_dims
     logging.basicConfig(level=args.loglevel)
     torch.manual_seed(args.random_seed)
-    # torch.cuda.set_device(args.gpu_ids)
 
     assert args.scale % 4 == 0
     if args.operation == 'test':
@@ -104,15 +103,18 @@ if __name__ == '__main__':
 
     if args.operation == 'train':
         exp_dir = os.path.join(args.working_dir, args.operation, f'{args.scene}_{args.architecture}_{args.suffix}')
-        wandb_logger = WandbLogger(project='sin-inn', name=f'{args.scene}_{args.architecture}_{args.suffix}')
+        if not os.path.isdir(exp_dir):
+            os.mkdir(exp_dir)
+        wandb_logger = WandbLogger(project='sin-inn', save_dir=exp_dir)
+        wandb_logger.log_hyperparams(args)
         trainer = Trainer(auto_lr_find=True,
                           auto_scale_batch_size=True,
-                          check_val_every_n_epoch=10,
+                          check_val_every_n_epoch=args.print_iter,
+                          # log_every_n_steps=10000,
                           default_root_dir=exp_dir,
                           gpus=args.gpu_ids,
                           logger=wandb_logger,
                           max_epochs=args.epochs,
-                          callbacks=[ModelCheckpoint(period=args.save_iter,
-                          							 dirpath=exp_dir)])
+                          callbacks=[ModelCheckpoint(period=args.save_iter)])
         loader = LitLoader(train_data, val_data, args.batch_size)
         trainer.fit(model, loader)

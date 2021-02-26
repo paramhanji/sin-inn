@@ -28,10 +28,10 @@ class TCR(nn.Module):
         dev = img.device
 
         # Rotation
-        center = torch.cuda.FloatTensor([w/2, h/2]).unsqueeze(0).to(dev)
+        center = torch.FloatTensor([w/2, h/2]).unsqueeze(0)
         center = center.repeat(b, 1)
         angle = ((self.ang - self.ang_neg)*random[:,0]  + self.ang_neg)
-        zoom = torch.ones(b, 2, device=dev)
+        zoom = torch.ones(b, 2)
         T = kornia.get_rotation_matrix2d(center, angle, zoom)
 
         # Translation
@@ -40,7 +40,7 @@ class TCR(nn.Module):
         T[:,0,2] += tx
         T[:,1,2] += ty
 
-        transformed = kornia.warp_affine(img, T, dsize=(h, w))
+        transformed = kornia.warp_affine(img, T.to(dev), dsize=(h, w))
 
         return transformed    
     

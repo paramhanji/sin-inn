@@ -25,7 +25,7 @@ class UncondSRFlow():
         # Define the model
         self.nodes = [Ff.InputNode(c, h, w, name='input')]
 
-        for ss in range(opt.scale//4):
+        for ss in range((opt.scale - 1).bit_length()):
             # Squeeze
             self.nodes.append(Ff.Node(self.nodes[-1],
                                       Fm.IRevNetDownsampling,
@@ -201,7 +201,10 @@ class InvRescaleNet(nn.Module):
         operations = []
 
         current_channel = c
-        for i in range(opt.scale//4):
+        b = HaarDownsampling(current_channel)
+        operations.append(b)
+        current_channel *= 4
+        for i in range((opt.scale - 1).bit_length()):
             b = HaarDownsampling(current_channel)
             operations.append(b)
             current_channel *= 4
