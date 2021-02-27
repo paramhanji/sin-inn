@@ -25,6 +25,11 @@ class UncondSRFlow():
         # Define the model
         self.nodes = [Ff.InputNode(c, h, w, name='input')]
 
+        self.nodes.append(Ff.Node(self.nodes[-1],
+                                  Fm.IRevNetDownsampling,
+                                  {},
+                                  name=f'squeeze_init'))
+
         for ss in range((opt.scale - 1).bit_length()):
             # Squeeze
             self.nodes.append(Ff.Node(self.nodes[-1],

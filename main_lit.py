@@ -4,7 +4,7 @@ from pytorch_lightning.loggers import WandbLogger
 from pytorch_lightning.callbacks import ModelCheckpoint
 
 from data import *
-from lit_wrapper import SingleVideoINN
+from lit_wrapper import SingleVideoINN, AliveEpochBar
 
 data_root = '/local/scratch/pmh64/datasets/adobe240f'
 
@@ -36,7 +36,7 @@ def get_args():
                     default='SRF')
     ap.add_argument('--scale', type=int, default=4,
                     help='difference in resolution between the 2 input streams')
-    ap.add_argument('-c', '--num_coupling', type=int, default=8,
+    ap.add_argument('-c', '--num_coupling', type=int, default=4,
                     help='number of GLOW blocks between downsamples')
     ap.add_argument('-r', '--resume_state', help='checkpoint to resume training')
 
@@ -62,7 +62,7 @@ def get_args():
     ap.add_argument('--random_seed', type=int, default=0)
 
     # TCR opts
-    ap.add_argument('--lambda_bwd_tcr', type=float, default=1)
+    ap.add_argument('--lambda_bwd_tcr', type=float, default=0)
     ap.add_argument('--rotation', type=float, default=5, help='in degrees')
     ap.add_argument('--translation', type=float, default=5, help='in pixels')
     ap.add_argument('--tcr_iters', type=float, default=5, help='samples per image')
@@ -105,7 +105,8 @@ if __name__ == '__main__':
         exp_dir = os.path.join(args.working_dir, args.operation, f'{args.scene}_{args.architecture}_{args.suffix}')
         if not os.path.isdir(exp_dir):
             os.mkdir(exp_dir)
-        wandb_logger = WandbLogger(project='sin-inn', save_dir=exp_dir)
+        wandb_logger = WandbLogger(project='sin-inn', save_dir=exp_dir,
+                                   name=os.path.basename(exp_dir))
         wandb_logger.log_hyperparams(args)
         trainer = Trainer(auto_lr_find=True,
                           auto_scale_batch_size=True,
@@ -118,3 +119,5 @@ if __name__ == '__main__':
                           callbacks=[ModelCheckpoint(period=args.save_iter)])
         loader = LitLoader(train_data, val_data, args.batch_size)
         trainer.fit(model, loader)
+
+    # TODO: test

@@ -1,5 +1,6 @@
 import logging
 import torch, pytorch_lightning as pl
+from pytorch_lightning.callbacks.progress import ProgressBarBase
 
 from archs import UncondSRFlow, InvRescaleNet
 from tcr import TCR
@@ -29,6 +30,8 @@ class SingleVideoINN(pl.LightningModule):
         Finally, update the gradients with the total loss.
         TODO: add_noise
         """
+        opt = self.optimizers()
+        opt.zero_grad()
         b, _, h, w = batch[0]['lr'].shape
 
         hr, lr = (batch[0][k] for k in ('hr', 'lr'))
@@ -67,8 +70,8 @@ class SingleVideoINN(pl.LightningModule):
         else:
             tcr_loss = 0
 
+        opt.step()
         self.log('train', fwd_loss + bwd_loss + tcr_loss)
-        # return {'log': {'train': fwd_loss + bwd_loss + tcr_loss }}
 
     def validation_step(self, batch, batch_idx):
         b, _, h, w = batch['lr'].shape
@@ -81,10 +84,6 @@ class SingleVideoINN(pl.LightningModule):
         self.log('lr_acc', loss.reconstruction(lr_z_hat[:,:self.opt.lr_dims,:,:], lr))
         self.log('hr_acc', loss.reconstruction(hr_hat, hr))
         self.log('z_nll', loss.latent_nll(lr_z_hat[:,self.opt.lr_dims:,:,:]))
-        # metrics = {'lr_acc': loss.reconstruction(lr_z_hat[:,:self.opt.lr_dims,:,:], lr),
-        #            'hr_acc': loss.reconstruction(hr_hat, hr),
-        #            'z_nll': loss.latent_nll(lr_z_hat[:,self.opt.lr_dims:,:,:])}
-        # return {'log': metrics}
 
     # TODO: forward
 
