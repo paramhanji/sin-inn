@@ -103,30 +103,35 @@ Wrap supervised and unsupervised datasets into single class
 TODO: Update to independently sample from entire database
 '''
 class ConcatDataset(Dataset):
-    def __init__(self, *datasets):
-        self.datasets = datasets
+    def __init__(self, sup, unsup):
+        self.sup = sup
+        self.unsup = unsup
+        self.num_sup = len(sup)
+        self.num_unsup = len(unsup)
 
     def __getitem__(self, i):
-        return tuple(d[i] for d in self.datasets)
+        # Generate random sample from unsupervised dataset
+        rand_i = torch.randint(self.num_unsup, (1,1)).item()
+        return self.sup[i], self.unsup[rand_i]
 
     def __len__(self):
-        return min(len(d) for d in self.datasets)
+        return self.num_sup
 
 
 def get_loader(dataset, batch=4):
     return DataLoader(dataset, batch_size=batch, shuffle=dataset.shuffle, num_workers=4)
 
 
-class LitLoader(pl.LightningDataModule):
+class LitTrainLoader(pl.LightningDataModule):
 
-    def __init__(self,  train_data, val_data, batch=4):
+    def __init__(self,  train_data, val_data, batch):
         super().__init__()
         self.batch = batch
         self.train_data = train_data
         self.val_data = val_data
 
     def train_dataloader(self):
-        return DataLoader(dataset=self.train_data, batch_size=self.batch, shuffle=True, num_workers=4)
+        return DataLoader(dataset=self.train_data, batch_size=self.batch, num_workers=4)
 
     def val_dataloader(self):
-        return DataLoader(dataset=self.val_data, batch_size=20, shuffle=False, num_workers=4)
+        return DataLoader(dataset=self.val_data, batch_size=40, num_workers=4)

@@ -13,7 +13,6 @@ class SingleVideoINN(pl.LightningModule):
         arch_module = {'SRF': UncondSRFlow, 'IRN':InvRescaleNet}
         self.opt = opt
         self.inn = arch_module[opt.architecture](c, h, w, opt)
-        logging.debug(self.inn)
 
         params = sum(p.numel() for p in self.inn.parameters())
         logging.info(f'Loaded model with {params} parameters to GPUs {opt.gpu_ids}')

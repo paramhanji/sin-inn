@@ -4,16 +4,11 @@ from pytorch_lightning.loggers import WandbLogger
 from pytorch_lightning.callbacks import ModelCheckpoint
 
 from data import *
-from lit_wrapper import SingleVideoINN, AliveEpochBar
-
-data_root = '/local/scratch/pmh64/datasets/adobe240f'
+from lit_wrapper import SingleVideoINN
 
 def get_args():
     ap = argparse.ArgumentParser(description='Train SR-Flow on single image')
     ap.add_argument('operation', choices=['train', 'test'])
-    ap.add_argument('-d', '--debug', action="store_const", dest="loglevel",
-                    const=logging.DEBUG, default=logging.WARNING)
-    ap.add_argument('-v', '--verbose', action="store_const", dest="loglevel", const=logging.INFO)
     ap.add_argument('-g', '--gpu_ids', nargs='+', type=int, default=[0],
                     help='GPU id if multiple GPUs are present (check with nvidia-smi)')
 
@@ -28,14 +23,14 @@ def get_args():
     ap.add_argument('--lr_window', type=int, default=10,
                     help='# of input low-res frames to use on either side of 1 high-res frame')
     ap.add_argument('-b', '--batch_size', type=int, default=8,
-                    help='batch size to use; on 12GB 1080ti with default architecture and\
-                    22x40 input-frame resolution use 8 for training and 40 for inference')
+                    help='batch size to use; on 12GB 1080ti with default architecture and '
+                          '640x360 HR frames use 8 for training and 40 for inference')
 
     # Architecture opts
     ap.add_argument('-a', '--architecture', choices=['SRF', 'IRN'],
                     default='SRF')
     ap.add_argument('--scale', type=int, default=4,
-                    help='difference in resolution between the 2 input streams')
+                    help='difference in resolution between HR and LR')
     ap.add_argument('-c', '--num_coupling', type=int, default=4,
                     help='number of GLOW blocks between downsamples')
     ap.add_argument('-r', '--resume_state', help='checkpoint to resume training')
@@ -78,7 +73,7 @@ def get_args():
     args = ap.parse_args()
     args.lr_dims = (2*args.lr_window + 1)*4
     args.z_dims = args.scale*args.scale*3*4 - args.lr_dims
-    logging.basicConfig(level=args.loglevel)
+    logging.basicConfig(level=logging.INFO)
     torch.manual_seed(args.random_seed)
 
     assert args.scale % 4 == 0
@@ -96,10 +91,14 @@ if __name__ == '__main__':
     # TODO: shuffle unsup data
     train_data = ConcatDataset(sup_data, unsup_data)
     val_data = VideoValDataset(args, len(train_data)*4//6)      # 60-40 train-test ratio
-    loader = get_loader(unsup_data)
-    hr_img, lr_img = (b[0] for b in next(iter(loader)).values())
 
-    model = SingleVideoINN(*hr_img.shape, args)
+    if args.resume_state:
+        model = SingleVideoINN.load_from_checkpoint(args.resume_state, map_location='cuda')
+    else:
+        # Get image dimensions from dataset
+        loader = get_loader(unsup_data)
+        hr_img, lr_img = (b[0] for b in next(iter(loader)).values())
+        model = SingleVideoINN(*hr_img.shape, args)
 
     if args.operation == 'train':
         exp_dir = os.path.join(args.working_dir, args.operation, f'{args.scene}_{args.architecture}_{args.suffix}')
@@ -111,13 +110,12 @@ if __name__ == '__main__':
         trainer = Trainer(auto_lr_find=True,
                           auto_scale_batch_size=True,
                           check_val_every_n_epoch=args.print_iter,
-                          # log_every_n_steps=10000,
                           default_root_dir=exp_dir,
                           gpus=args.gpu_ids,
                           logger=wandb_logger,
                           max_epochs=args.epochs,
                           callbacks=[ModelCheckpoint(period=args.save_iter)])
-        loader = LitLoader(train_data, val_data, args.batch_size)
+        loader = LitTrainLoader(train_data, val_data, args.batch_size)
         trainer.fit(model, loader)
 
     # TODO: test
