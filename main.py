@@ -33,13 +33,13 @@ def get_args():
                     help='difference in resolution between HR and LR')
     ap.add_argument('-c', '--num_coupling', type=int, default=4,
                     help='number of GLOW blocks between downsamples')
-    ap.add_argument('-r', '--resume_state', help='checkpoint to resume training')
+    ap.add_argument('-r', '--resume_state', default=None, help='checkpoint to resume training')
 
     # Training log opts
     ap.add_argument('-w', '--working_dir', default='experiments',
                     help='directory to save logs and intermediate files')
     ap.add_argument('-e', '--epochs', type=int, default=10000)
-    ap.add_argument('--save_iter', type=int, default=1000,
+    ap.add_argument('--save_iter', type=int, default=100,
                     help='frequency of checkpointing (in terms of # of epochs)')
     ap.add_argument('-p', '--print_iter', type=int, default=10,
                     help='frequency of logging (in terms of # of epochs)')
@@ -92,13 +92,10 @@ if __name__ == '__main__':
     train_data = ConcatDataset(sup_data, unsup_data)
     val_data = VideoValDataset(args, len(train_data)*4//6)      # 60-40 train-test ratio
 
-    if args.resume_state:
-        model = SingleVideoINN.load_from_checkpoint(args.resume_state, map_location='cuda')
-    else:
-        # Get image dimensions from dataset
-        loader = get_loader(unsup_data)
-        hr_img, lr_img = (b[0] for b in next(iter(loader)).values())
-        model = SingleVideoINN(*hr_img.shape, args)
+    # Get image dimensions from dataset
+    loader = get_loader(unsup_data)
+    hr_img, lr_img = (b[0] for b in next(iter(loader)).values())
+    model = SingleVideoINN(*hr_img.shape, args)
 
     if args.operation == 'train':
         exp_dir = os.path.join(args.working_dir, args.operation, f'{args.scene}_{args.architecture}_{args.suffix}')
@@ -114,6 +111,7 @@ if __name__ == '__main__':
                           gpus=args.gpu_ids,
                           logger=wandb_logger,
                           max_epochs=args.epochs,
+                          resume_from_checkpoint=args.resume_state,
                           callbacks=[ModelCheckpoint(period=args.save_iter)])
         loader = LitTrainLoader(train_data, val_data, args.batch_size)
         trainer.fit(model, loader)

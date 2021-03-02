@@ -10,6 +10,7 @@ class SingleVideoINN(pl.LightningModule):
 
     def __init__(self, c, h, w, opt):
         super().__init__()
+        self.save_hyperparameters()
         arch_module = {'SRF': UncondSRFlow, 'IRN':InvRescaleNet}
         self.opt = opt
         self.inn = arch_module[opt.architecture](c, h, w, opt)
