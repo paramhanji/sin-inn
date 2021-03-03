@@ -93,12 +93,13 @@ if __name__ == '__main__':
     val_data = VideoValDataset(args, len(train_data)*4//6)      # 60-40 train-test ratio
 
     # Get image dimensions from dataset
-    loader = get_loader(unsup_data)
+    loader = get_loader(unsup_data, 40)
     hr_img, lr_img = (b[0] for b in next(iter(loader)).values())
     model = SingleVideoINN(*hr_img.shape, args)
 
     if args.operation == 'train':
-        exp_dir = os.path.join(args.working_dir, args.operation, f'{args.scene}_{args.architecture}_{args.suffix}')
+        exp_dir = os.path.join(args.working_dir, args.operation,
+                               f'{args.scene}_{args.architecture}_{args.suffix}')
         if not os.path.isdir(exp_dir):
             os.mkdir(exp_dir)
         wandb_logger = WandbLogger(project='sin-inn', save_dir=exp_dir,
@@ -116,4 +117,21 @@ if __name__ == '__main__':
         loader = LitTrainLoader(train_data, val_data, args.batch_size)
         trainer.fit(model, loader)
 
-    # TODO: test
+    if args.operation == 'test':
+        assert args.resume_state is not None, 'Please provide weights using --resume_state'
+        exp_dir = os.path.join(args.working_dir, args.operation, args.scene)
+        if not os.path.isdir(exp_dir):
+            os.mkdir(exp_dir)
+        video_path = os.path.join(exp_dir, f'{args.architecture}_{args.suffix}_t{args.temp}.avi')
+
+        checkpoint = torch.load(args.resume_state, map_location=f'cuda:{args.gpu_ids[0]}')
+        try:
+            model.load_state_dict(checkpoint['state_dict'])
+        except Exception as e:
+            # https://github.com/VLL-HD/FrEIA/issues/10
+            logging.warning(str(e))
+            if input(f'Is this is the known FrEIA error (y/n)? ') == 'y':
+                model.load_state_dict(checkpoint['state_dict'], strict=False)
+            else:
+                exit(1)
+        model.infer(loader, args, save_video=video_path)

@@ -1,6 +1,9 @@
-import logging
+import logging, os, subprocess as sp
+from tqdm import tqdm
+
 import torch, pytorch_lightning as pl
 from pytorch_lightning.callbacks.progress import ProgressBarBase
+import torchvision.transforms as transforms
 
 from archs import UncondSRFlow, InvRescaleNet
 from tcr import TCR
@@ -16,7 +19,7 @@ class SingleVideoINN(pl.LightningModule):
         self.inn = arch_module[opt.architecture](c, h, w, opt)
 
         params = sum(p.numel() for p in self.inn.parameters())
-        logging.info(f'Loaded model with {params} parameters to GPUs {opt.gpu_ids}')
+        logging.info(f'Created model with {params/1e5:.2f}M parameters. Using GPUs {opt.gpu_ids}')
 
         self.tcr = TCR(opt.rotation, opt.translation)
 
@@ -85,7 +88,45 @@ class SingleVideoINN(pl.LightningModule):
         self.log('hr_acc', loss.reconstruction(hr_hat, hr))
         self.log('z_nll', loss.latent_nll(lr_z_hat[:,self.opt.lr_dims:,:,:]))
 
-    # TODO: forward
+    def infer(self, loader, opt, save_images=None, save_video=None):
+        self.inn.eval()
+        self.inn.to('cuda')
+        trans = transforms.ToPILImage()
+
+        if save_video:
+            # Create subprocess pipes to feed ffmpeg
+            dump = open(os.devnull, 'w')
+            fps = '30'
+            crf = '18'
+            video = sp.Popen(['ffmpeg', '-framerate', fps, '-i', '-',
+                              '-c:v', 'libx264', '-preset', 'veryslow', '-crf', crf, '-y',
+                              save_video], stdin=sp.PIPE, stderr=dump)
+
+        for bb, batch in enumerate(tqdm(loader)):
+            b, c, h, w = batch['lr'].shape
+            lr = batch['lr'].to('cuda')
+
+            # Sample from latents
+            z = opt.temp * torch.randn(b, opt.z_dims, h, w, device=lr.device)
+            lr_z = torch.cat((lr, z), dim=1)
+
+            # The reverse pass
+            with torch.no_grad():
+                hr_hat = self.inn.forward(lr_z, rev=True)
+
+            if save_images or save_video:
+                hr_hat.to('cpu')
+                for i, im_out in enumerate(hr_hat):
+                    im_out = trans(im_out)
+                    if save_images:
+                        im_out.save(os.path.join(save_path, f'out_{bb:04d}_{i:02d}.png'))
+                    else:
+                        im_out.save(video.stdin, 'PNG')
+
+        if save_video:
+            video.stdin.close()
+            video.communicate()
+
 
     def configure_optimizers(self):
         # TODO: initalise params, adam opts, weight decay
