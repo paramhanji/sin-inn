@@ -15,12 +15,13 @@ def get_args():
 					help='select reduction operation (only for binning)')
 	ap.add_argument('-s', '--scale', type=int, default=4)
 	ap.add_argument('-b', '--bayer', action='store_true', help='set if input video contains bayer frames')
+	ap.add_argument('-n', '--noise', type=float, help='Standard deviation of noise to add to HR frames')
 
 	args = ap.parse_args()
 	dataset = os.path.join(os.path.dirname(args.video), '..')
 	scene = os.path.splitext(os.path.basename(args.video))[0]
 	scene = f'{scene}_{args.operator}_{args.scale}x'
-	for f in ('hr_frames', 'lr_frames', 'lr_frames_demosaiced'):
+	for f in ('hr_frames', 'lr_frames', 'lr_frames_demosaiced', 'hr_frames_noisy'):
 		r_dir = os.path.join(dataset, f, scene)
 		if not os.path.isdir(r_dir):
 			os.mkdir(r_dir)
@@ -120,6 +121,7 @@ def pack_demosaic(img):
 if __name__ == '__main__':
 	args, (dataset, scene) = get_args()
 
+	print(f'Reading video: {args.video}')
 	reader = io.get_reader(args.video)
 	for i, frame in tqdm(enumerate(reader)):
 		if frame.dtype == np.uint8:
@@ -136,6 +138,13 @@ if __name__ == '__main__':
 		hr = (np.clip(hr, 0, 1) * 255).astype(np.uint8)
 		filename = os.path.join(dataset, 'hr_frames', scene, f'frame_{i+1:05d}.png')
 		io.imwrite(filename, hr)
+
+		if args.noise:
+			# Write noisy HR frame
+			noisy = hr + np.random.normal(0, args.noise, hr.shape)
+			noisy = np.clip(noisy, 0, 255).astype(np.uint8)
+			filename = os.path.join(dataset, 'hr_frames_noisy', scene, f'frame_{i+1:05d}.png')
+			io.imwrite(filename, noisy)
 
 		# TODO: automatic cropping to nearest multiple of "scale"
 		h, w = bayer.shape
