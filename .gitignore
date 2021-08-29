@@ -143,3 +143,5 @@ experiments/
 
 # VS code
 .vscode/
+
+logs/
