@@ -16,10 +16,10 @@ def net(in_channels, activation, out_channels=3):
     return M.MLP(
         in_channels,
         out_channels=out_channels,
-        # hidden_dim=512,
-        # hidden_layers=4,
-        hidden_dim=256,
-        hidden_layers=3,
+        hidden_dim=512,
+        hidden_layers=4,
+        # hidden_dim=256,
+        # hidden_layers=3,
         activation=activation)
 
 siren = net(3, 'siren')
@@ -33,15 +33,16 @@ def get_args():
 
 def train_model():
     # video_clip = D.FlowImagesModule('/anfs/gfxdisp/video/adobe240f/hr_frames/GOPR9634_binning_4x/', 10, 50, 10)
-    video_clip = D.VideoModule('../datasets/dancing.mp4', 0, 450, step=3, batch=16)
-    logger = TensorBoardLogger('logs', name="dancing", version=f'siren/{video_clip.dataset.step}stepflow')
+    video_clip = D.VideoModule('../datasets/dancing.mp4', 0, 450, step=10, batch=6)
+    logger = TensorBoardLogger('logs', name="dancing", version=f'siren/{video_clip.dataset.step}step_unsup')
     model = T.FlowTrainer(loss=F.l1_loss, net=siren_flow, lr=1e-4)
     latest_ckpt = max(glob(f'{logger.save_dir}/{logger.name}/{logger.version}/checkpoints/*.ckpt'), key=path.getmtime, default=None)
     trainer = pl.Trainer(gpus=1, logger=logger, max_epochs=50000,
         # auto_lr_find=True,
         callbacks=[ModelCheckpoint()],
         resume_from_checkpoint=latest_ckpt,
-        check_val_every_n_epoch=500)
+        check_val_every_n_epoch=500,
+        num_sanity_val_steps=0)
     with ipdb.launch_ipdb_on_exception():
         if latest_ckpt is None:
             trainer.tune(model, video_clip.train_dataloader())
