@@ -98,7 +98,7 @@ def cv_resize(img, flag, scale):
 	resized[...,2] = cv2.resize(bayer[1::2,::2], (0, 0), fx=1/scale, fy=1/scale, interpolation=flag)
 	resized[...,3] = cv2.resize(bayer[1::2,1::2], (0, 0), fx=1/scale, fy=1/scale, interpolation=flag)
 
-	return resize
+	return resized
 
 def pack_demosaic(img):
 	"""

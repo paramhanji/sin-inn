@@ -1,7 +1,83 @@
 import numpy as np
 import os
+import subprocess
 import sys
 import imageio
+
+
+def run_colmap(basedir, match_type):
+    
+    logfile_name = os.path.join(basedir, 'colmap_output.txt')
+    logfile = open(logfile_name, 'w')
+    colmap_exe = '/local/scratch/pmh64/software/usr/local/bin/colmap'
+
+    feature_extractor_args = [
+        colmap_exe, 'feature_extractor', 
+            '--database_path', os.path.join(basedir, 'database.db'), 
+            '--image_path', os.path.join(basedir, 'images'),
+            '--ImageReader.single_camera', '1',
+            # '--SiftExtraction.use_gpu', '0',
+    ]
+    feat_output = ( subprocess.check_output(feature_extractor_args, universal_newlines=True) )
+    logfile.write(feat_output)
+    print('Features extracted')
+
+    matcher_args = [
+        colmap_exe, match_type, 
+            '--database_path', os.path.join(basedir, 'database.db'), 
+    ]
+
+    match_output = ( subprocess.check_output(matcher_args, universal_newlines=True) )
+    logfile.write(match_output)
+    print('Features matched')
+    
+    p = os.path.join(basedir, 'sparse')
+    if not os.path.exists(p):
+        os.makedirs(p)
+
+    mapper_args = [
+        colmap_exe, 'mapper',
+            '--database_path', os.path.join(basedir, 'database.db'),
+            '--image_path', os.path.join(basedir, 'images'),
+            '--output_path', os.path.join(basedir, 'sparse'), # --export_path changed to --output_path in colmap 3.6
+            '--Mapper.num_threads', '16',
+            '--Mapper.init_min_tri_angle', '4',
+            '--Mapper.multiple_models', '0',
+    ]
+
+    map_output = ( subprocess.check_output(mapper_args, universal_newlines=True) )
+    logfile.write(map_output)
+    print('Sparse reconstruction done')
+
+    p = os.path.join(basedir, 'dense')
+    if not os.path.exists(p):
+        os.makedir(p)
+
+    undistorter_args = [
+        colmap_exe, 'image_undistorter',
+            '--image_path', os.path.join(basedir, 'images'),
+            '--input_path', os.path.join(basedir, 'sparse', '0'),
+            '--output_path', os.path.join(basedir, 'dense'), # --export_path changed to --output_path in colmap 3.6
+            '--output_type', 'COLMAP',
+    ]
+
+    undistort_output = ( subprocess.check_output(undistorter_args, universal_newlines=True) )
+    logfile.write(undistort_output)
+
+    patchmatch_args = [
+        colmap_exe, 'patch_match_stereo',
+            '--workspace_path', os.path.join(basedir, 'dense'),
+            '--workspace_format', 'COLMAP',
+            '--PatchMatchStereo.geom_consistency', 'true',
+    ]
+
+    patchmatch_output = ( subprocess.check_output(patchmatch_args, universal_newlines=True) )
+    logfile.write(patchmatch_output)
+    logfile.close()
+    print('Dense reconstruction done')
+
+    print( 'Finished running COLMAP, see {} for logs'.format(logfile_name) )
+
 
 def load_colmap_data(realdir):
     
@@ -93,7 +169,7 @@ def save_poses(basedir, poses, pts3d, perm):
     np.save(os.path.join(basedir, 'poses_bounds.npy'), save_arr)
 
 
-def load_data(basedir, factor=None, width=None, height=None, load_imgs=True):
+def load_data(basedir, index=None):
     
     poses_arr = np.load(os.path.join(basedir, 'poses_bounds.npy'))
     poses = poses_arr[:, :-2].reshape([-1, 3, 6])
@@ -112,15 +188,17 @@ def load_data(basedir, factor=None, width=None, height=None, load_imgs=True):
     sh = imageio.imread(imgfiles[0]).shape
     assert (poses[0, :2, 4].astype(np.int) == np.array(sh[:2])).all()
 
-    if not load_imgs:
-        return poses, bds
-    
+    if index is not None:
+        img = imageio.imread(imgfiles[index], ignoregamma=True)[...,:3].astype(np.float32)/255
+        depth = read_depth(basedir, index=index)
+        return poses[index], bds[index], img, depth
+
     imgs = [imageio.imread(f, ignoregamma=True)[...,:3].astype(np.float32)/255 for f in imgfiles]
     imgs = np.stack(imgs, 0)
 
     depths = np.stack(read_depth(basedir), 0)
     
-    return poses[:10], bds[:10], imgs[:10], depths[:10]
+    return poses, bds, imgs, depths
 
 
 def gen_poses(basedir, match_type, format='.bin'):
@@ -141,41 +219,62 @@ def gen_poses(basedir, match_type, format='.bin'):
     print( 'Done with imgs2poses' )
 
 
-def read_depth(root):
+def read_depth(root, index=None):
     root = os.path.join(root, 'stereo/depth_maps')
-    depth_maps = []
+    depth_paths = []
     for f in sorted(os.listdir(root)):
         if f.endswith('geometric.bin'):
-            path = os.path.join(root, f)
-            with open(path, "rb") as fid:
-                width, height, channels = np.genfromtxt(fid, delimiter="&", max_rows=1,
-                                                        usecols=(0, 1, 2), dtype=int)
-                fid.seek(0)
-                num_delimiter = 0
+            depth_paths.append(os.path.join(root, f))
+
+    if index is not None:
+        path = depth_paths[index]
+        with open(path, "rb") as fid:
+            width, height, channels = np.genfromtxt(fid, delimiter="&", max_rows=1,
+                                                    usecols=(0, 1, 2), dtype=int)
+            fid.seek(0)
+            num_delimiter = 0
+            byte = fid.read(1)
+            while True:
+                if byte == b"&":
+                    num_delimiter += 1
+                    if num_delimiter >= 3:
+                        break
                 byte = fid.read(1)
-                while True:
-                    if byte == b"&":
-                        num_delimiter += 1
-                        if num_delimiter >= 3:
-                            break
-                    byte = fid.read(1)
-                array = np.fromfile(fid, np.float32)
-            array = array.reshape((width, height, channels), order="F")
-            array = np.transpose(array, (1, 0, 2)).squeeze()
-            depth_maps.append(array)
+            array = np.fromfile(fid, np.float32)
+        array = array.reshape((width, height, channels), order="F")
+        array = np.transpose(array, (1, 0, 2)).squeeze()
+        return array
+
+    depth_maps = []
+    for path in depth_paths:
+        with open(path, "rb") as fid:
+            width, height, channels = np.genfromtxt(fid, delimiter="&", max_rows=1,
+                                                    usecols=(0, 1, 2), dtype=int)
+            fid.seek(0)
+            num_delimiter = 0
+            byte = fid.read(1)
+            while True:
+                if byte == b"&":
+                    num_delimiter += 1
+                    if num_delimiter >= 3:
+                        break
+                byte = fid.read(1)
+            array = np.fromfile(fid, np.float32)
+        array = array.reshape((width, height, channels), order="F")
+        array = np.transpose(array, (1, 0, 2)).squeeze()
+        depth_maps.append(array)
     return depth_maps
 
 
 if __name__ == '__main__':
     import argparse
     parser = argparse.ArgumentParser(description='A wrapper to parse COLMAP outputs')
-    parser.add_argument('--colmap-dir', help='path to COLMAP folder', default=None)
+    parser.add_argument('colmap_dir', help='path to COLMAP folder')
     parser.add_argument('--input-format', choices=['.bin', '.txt'],
                         help='input model format', default='.bin')
     parser.add_argument('--matcher', help='COLMAP matcher to use', default='sequential_matcher')
     args = parser.parse_args()
 
-    from colmap_wrapper import run_colmap
     import colmap_read_model as read_model
 
     gen_poses(args.colmap_dir, args.matcher, format=args.input_format)
