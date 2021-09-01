@@ -9,26 +9,6 @@ import os.path as path
 
 torchvision.set_video_backend('pyav')
 
-class FlowImagesData(data.Dataset):
-    def __init__(self, dir: str, start, duration, size=200, step=10):
-        super().__init__()
-        trans = T.Compose([
-            lambda x: io.read_image(x) / 255,
-            T.Resize(size),
-            # T.CenterCrop(size),
-            ])
-        self.step = step
-        self.videos = torch.stack([trans(path.join(dir, f"frame_{i:05d}.png"))
-            for i in range(start, start+duration*step, step)], dim=0)
-        self.T = torch.linspace(-1, 1, self.videos.size(0))
-
-    def __len__(self):
-        return self.videos.size(0) - 1
-
-    def __getitem__(self, index):
-        return self.videos[index], self.videos[index+1], self.T[index]
-
-
 class VideoClip(data.Dataset):
     def __init__(self, video: str, start, duration, size=200, step=10):
         super().__init__()
@@ -67,7 +47,6 @@ class VideoClip(data.Dataset):
                 im1, im2 = padder.pad(im1, im2)
                 _, flow1 = model(im1, im2, iters=20, test_mode=True)
                 _, flow2 = model(im2, im1, iters=20, test_mode=True)
-                # self.flow.append(flow1)
 
                 coords0 = coords_grid(1, im1.shape[2], im1.shape[3]).cuda()
                 coords1 = coords0 + flow1
@@ -79,13 +58,6 @@ class VideoClip(data.Dataset):
 
         self.flow = torch.stack(self.flow)
         sys.path.pop()
-        # print(self.videos.shape, self.flow.shape)
-        # import gfxdisp
-        # v = gfxdisp.pfs.pfs()
-        # v.view(self.videos[8].permute(1,2,0).cpu().numpy())
-        # v.view(self.flow[8].permute(1,2,0).norm(dim=-1).cpu().numpy())
-        # exit(-1)
-
 
     def __len__(self):
         return self.videos.size(0) - 1
@@ -93,16 +65,6 @@ class VideoClip(data.Dataset):
     def __getitem__(self, index):
         return self.videos[index], self.videos[index+1], self.T[index], self.flow[index]
 
-
-class FlowImagesModule(pl.LightningDataModule):
-    def __init__(self, dir: str, start, duration, step, batch=8):
-        super().__init__()
-        self.dataset = FlowImagesData(dir, start, duration, step=step)
-        self.batch = batch
-    def train_dataloader(self) -> data.DataLoader:
-        return data.DataLoader(self.dataset, batch_size=self.batch)
-    def val_dataloader(self) -> data.DataLoader:
-        return data.DataLoader(self.dataset, batch_size=1)
 
 class VideoModule(pl.LightningDataModule):
     def __init__(self, file: str, start, duration, size=200, step=10, batch=8):
@@ -112,6 +74,8 @@ class VideoModule(pl.LightningDataModule):
     def train_dataloader(self) -> data.DataLoader:
         return data.DataLoader(self.dataset, batch_size=self.batch)
     def val_dataloader(self) -> data.DataLoader:
+        return data.DataLoader(self.dataset, batch_size=1)
+    def test_dataloader(self) -> data.DataLoader:
         return data.DataLoader(self.dataset, batch_size=1)
 
 if __name__ == "__main__":

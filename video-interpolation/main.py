@@ -5,6 +5,7 @@ import model as M
 from glob import glob
 import os.path as path
 import ipdb, argparse
+from math import ceil
 
 import torch
 import torch.nn.functional as F
@@ -16,51 +17,52 @@ def net(in_channels, activation, out_channels=3):
     return M.MLP(
         in_channels,
         out_channels=out_channels,
-        hidden_dim=512,
-        hidden_layers=4,
-        # hidden_dim=256,
-        # hidden_layers=3,
+        hidden_dim=256,
+        # hidden_dim=512,
+        hidden_layers=3,
+        # hidden_layers=4,
         activation=activation)
 
-siren = net(3, 'siren')
-siren_flow = net(3, 'siren', out_channels=2)
+siren = net(3, 'siren', out_channels=2)
 
 def get_args():
     parser = argparse.ArgumentParser()
     parser.add_argument('operation', choices=['train', 'test'])
-    parser.add_argument('--model-path')
+    parser.add_argument('--input-video', default='../datasets/dancing.mp4')
+    parser.add_argument('--end', default=450, type=int)
+    parser.add_argument('--step', default=10, type=int)
+    parser.add_argument('--batch', default=16, type=int)
+    parser.add_argument('--epochs', default=10000, type=int)
+    parser.add_argument('--log-iter', default=1000, type=int)
+    parser.add_argument('--lr', default=1e-3, type=float)
     return parser.parse_args()
 
-def train_model():
-    # video_clip = D.FlowImagesModule('/anfs/gfxdisp/video/adobe240f/hr_frames/GOPR9634_binning_4x/', 10, 50, 10)
-    video_clip = D.VideoModule('../datasets/dancing.mp4', 0, 450, step=10, batch=6)
-    logger = TensorBoardLogger('logs', name="dancing", version=f'siren/{video_clip.dataset.step}step_unsup')
-    model = T.FlowTrainer(loss=F.l1_loss, net=siren_flow, lr=1e-4)
-    latest_ckpt = max(glob(f'{logger.save_dir}/{logger.name}/{logger.version}/checkpoints/*.ckpt'), key=path.getmtime, default=None)
-    trainer = pl.Trainer(gpus=1, logger=logger, max_epochs=50000,
-        # auto_lr_find=True,
-        callbacks=[ModelCheckpoint()],
-        resume_from_checkpoint=latest_ckpt,
-        check_val_every_n_epoch=500,
-        num_sanity_val_steps=0)
+def train_model(video, logger, ckpt, args):
+    model = T.FlowTrainer(loss=F.l1_loss, net=siren, lr=args.lr,
+                          step=args.step, flow_scale=video.dataset.flow.max())
+    trainer = pl.Trainer(gpus=1, logger=logger, max_epochs=args.epochs,
+                         callbacks=[ModelCheckpoint()], resume_from_checkpoint=ckpt,
+                         check_val_every_n_epoch=args.log_iter,
+                         num_sanity_val_steps=ceil(len(video.dataset)/args.batch))
     with ipdb.launch_ipdb_on_exception():
-        if latest_ckpt is None:
-            trainer.tune(model, video_clip.train_dataloader())
-        trainer.fit(model, video_clip)
+        trainer.fit(model, video)
 
-def test_model():
-    video_clip = D.FlowImagesModule('/anfs/gfxdisp/video/adobe240f/hr_frames/IMG_0028_binning_4x', 20, 49, 5, batch=1)
-    logger = TensorBoardLogger('logs', name="stair", version='siren/5stepflow')
-    model = T.FlowTrainer(loss=F.l1_loss, net=siren_flow, lr=1e-4)
-    latest_ckpt = max(glob(f'{logger.save_dir}/{logger.name}/{logger.version}/checkpoints/*.ckpt'), key=path.getmtime, default=None)
-    trainer = pl.Trainer(gpus=1, logger=logger)
-    trainer.test(model, dataloaders=video_clip.train_dataloader(), ckpt_path=latest_ckpt)
-
+def test_model(video, ckpt, step):
+    model = T.FlowTrainer.load_from_checkpoint(ckpt, net=siren, step=step,
+                                               flow_scale=video.dataset.flow.max(),
+                                               log_gt=False)
+    trainer = pl.Trainer(gpus=1, logger=None)
+    trainer.test(model, dataloaders=video.test_dataloader())
 
 
 if __name__ == "__main__":
     args = get_args()
+    video_clip = D.VideoModule(args.input_video, 0, args.end, step=args.step, batch=args.batch)
+    scene, _ = path.splitext(path.basename(args.input_video))
+    logger = TensorBoardLogger('logs', name=scene, version=f'{args.step}_step_unsup')
+    latest_ckpt = max(glob(f'{logger.save_dir}/{logger.name}/{logger.version}/checkpoints/*.ckpt'),
+                      key=path.getmtime, default=None)
     if args.operation == 'train':
-        train_model()
+        train_model(video_clip, logger, latest_ckpt, args)
     elif args.operation == 'test':
-        test_model()
+        test_model(video_clip, latest_ckpt, args.step)

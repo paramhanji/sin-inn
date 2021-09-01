@@ -7,16 +7,21 @@ from torch.functional import Tensor
 from model import MLP
 import torchmetrics as metrics
 from typing import Union, Tuple
+import torchvision.io as io
 
-from resample2d import Resample2d
+from my_utils.resample2d import Resample2d
+from my_utils.flow_viz import flow2img
 
 
 class FlowTrainer(pl.LightningModule):
     def __init__(self, *,
             encoder=nn.Identity(), 
-            net=MLP(2, 3, 256, 3, activation='relu'),
-            loss=F.mse_loss,
-            lr=1e-3):
+            net=None,
+            loss=None,
+            lr=None,
+            step=None,
+            flow_scale=None,
+            log_gt=True):
         super().__init__()
 
         self.net = net
@@ -24,8 +29,9 @@ class FlowTrainer(pl.LightningModule):
         self.resample = Resample2d()
         self.loss = loss
         self.lr = lr
-        self.data_step = 10
-        self.write_gt_flow = True
+        self.data_step = step
+        self.flow_scale = flow_scale
+        self.write_gt_flow = log_gt
 
         self.psnr = metrics.PSNR()
 
@@ -45,20 +51,9 @@ class FlowTrainer(pl.LightningModule):
         return pred, flow
 
     def on_train_start(self) -> None:
-        self.flow_scale = self.trainer.train_dataloader.dataset.datasets.flow.max()
         print(f'=== learning rate {self.lr} ===')
-
-    def training_step_end(self, outputs):
-        self.logger.experiment.add_scalar('Loss', outputs['loss'], self.global_step)
-        self.logger.experiment.add_scalar('PSNR', self.psnr(outputs['target'],outputs['predict']), self.global_step)
-        return outputs['loss']
-
-    def training_epoch_end(self, outputs):
-        dataset = self.trainer.train_dataloader.dataset.datasets
-        self.data_step = dataset.step
-        frames = dataset.videos
-        if self.current_epoch == 0:
-            self.logger.experiment.add_video('original', frames.unsqueeze(0), 0)
+        video = self.trainer.train_dataloader.dataset.datasets.videos.unsqueeze(0)
+        self.logger.experiment.add_video('original', video, 0)
 
     def training_step(self, batch, batch_idx):
         frame1, frame2, times, flow = batch
@@ -69,23 +64,27 @@ class FlowTrainer(pl.LightningModule):
         self.log('train_loss', loss)
         return dict(loss=loss, predict=new_video.clamp(0, 1), target=frame2)
 
+    def training_step_end(self, outputs):
+        self.logger.experiment.add_scalar('Loss', outputs['loss'], self.global_step)
+        self.logger.experiment.add_scalar('PSNR', self.psnr(outputs['target'],outputs['predict']), self.global_step)
+        return outputs['loss']
+
     def validation_step(self, batch, batch_idx):
         frame1, frame2, times, gt_flow = batch
-        vid_all = [frame1]
-        flow_all = []
+        vid_all, flow_all = [frame1], []
         for i, t in enumerate(torch.linspace(0, 1, self.data_step + 1)[1:-1]):
-            if self.write_gt_flow:
-                new_video, flow = self.forward(frame1, times, factor=t, gt_flow=gt_flow)
-            else:
-                new_video, flow = self.forward(frame1, times, factor=t)
-            flow = flow.norm(dim=1)
+            new_video, flow = self.forward(frame1, times, factor=t, gt_flow=gt_flow) \
+                              if self.write_gt_flow else \
+                              self.forward(frame1, times, factor=t)
             vid_all.append(new_video)
             if i == 0:
-                flow_all.append(flow/t)
+                flow = torch.cat((flow/t, gt_flow), dim=-1).permute(0,2,3,1)
+                flow = flow.squeeze().cpu().numpy().clip(-10, 10)
+                flow_image = torch.tensor(flow2img(flow)).unsqueeze(0).permute(0,3,1,2)
+                flow_all.append(flow_image)
         vid_all.append(frame2)
         vid_all = torch.stack(vid_all).squeeze()
-        flow_all = torch.stack(flow_all).squeeze(1)
-        flow_all = torch.cat((flow_all, gt_flow.norm(dim=1)), dim=-1)
+        flow_all = torch.stack(flow_all).squeeze()
         return dict(vid=vid_all, flow=flow_all)
 
     def validation_epoch_end(self, outputs):
@@ -96,6 +95,19 @@ class FlowTrainer(pl.LightningModule):
         if self.write_gt_flow:
             print('Logging GT flow')
             self.write_gt_flow = False
+
+    def on_test_start(self):
+        print('Start evaluation epoch')
+        self.write_gt_flow = False
+
+    def test_step(self, *args):
+        return self.validation_step(*args)
+
+    def test_epoch_end(self, outputs):
+        video = torch.cat([seq['vid'] for seq in outputs]).permute(0,2,3,1)
+        flow = torch.stack([seq['flow'] for seq in outputs]).permute(0,2,3,1)
+        io.write_video('interpolated.mp4', video.cpu()*255, fps=self.data_step)
+        io.write_video('flow.mp4', flow.cpu()*255, fps=1)
 
     def configure_optimizers(self):
         return torch.optim.Adam(self.net.parameters(), lr=self.lr)
