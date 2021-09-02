@@ -13,54 +13,50 @@ from my_utils.resample2d import Resample2d
 from my_utils.flow_viz import flow2img
 
 
+def net(in_channels, activation, out_channels=3):
+    return MLP(
+        in_channels,
+        out_channels=out_channels,
+        hidden_dim=256,
+        # hidden_dim=512,
+        hidden_layers=3,
+        # hidden_layers=4,
+        activation=activation)
+
+
 class FlowTrainer(pl.LightningModule):
-    def __init__(self, *,
-            encoder=nn.Identity(), 
-            net=None,
-            loss=None,
-            lr=None,
-            step=None,
-            flow_scale=None,
-            log_gt=True):
+    def __init__(self, loss=None, lr=None, step=None, flow_scale=None):
         super().__init__()
 
-        self.net = net
-        self.encoder = encoder
+        self.save_hyperparameters()
+        self.net = net(3, 'siren', out_channels=2)
         self.resample = Resample2d()
         self.loss = loss
         self.lr = lr
         self.data_step = step
         self.flow_scale = flow_scale
-        self.write_gt_flow = log_gt
 
         self.psnr = metrics.PSNR()
 
-    def forward(self, F: Tensor, T: Tensor, factor=1, gt_flow=None):
-        if gt_flow is not None:
-            flow = gt_flow * factor
-        else:
-            h, w = F.shape[-2:]
-            t = T.size(0)
-            H = torch.linspace(-1, 1, h).to(T)
-            W = torch.linspace(-1, 1, w).to(T)
-            gridT, gridH, gridW = torch.meshgrid(T, H, W)
-            poses = torch.stack((gridT, gridH, gridW), dim=-1).view(-1, 3)
-            encoding = self.encoder(poses)
-            flow = self.net(encoding).view(t, h, w, 2).permute(0, 3, 1, 2) * factor * self.flow_scale
-        pred = self.resample(F.contiguous(), flow.contiguous())
-        return pred, flow
+    def forward(self, F: Tensor, T: Tensor):
+        _, _, h, w = F.shape
+        t = T.size(0)
+        H = torch.linspace(-1, 1, h).to(T)
+        W = torch.linspace(-1, 1, w).to(T)
+        gridT, gridH, gridW = torch.meshgrid(T, H, W)
+        poses = torch.stack((gridT, gridH, gridW), dim=-1).view(-1, 3)
+        flow = self.net(poses).view(t, h, w, 2).permute(0, 3, 1, 2) * self.flow_scale
+        return flow
 
     def on_train_start(self) -> None:
         print(f'=== learning rate {self.lr} ===')
-        video = self.trainer.train_dataloader.dataset.datasets.videos.unsqueeze(0)
-        self.logger.experiment.add_video('original', video, 0)
+        self.write_gt_flow = True
 
     def training_step(self, batch, batch_idx):
-        frame1, frame2, times, flow = batch
-        new_video, new_flow = self.forward(frame1, times)
+        frame1, frame2, times = batch
+        flow = self.forward(frame1, times)
+        new_video = self.resample(frame1.contiguous(), flow.contiguous())
         loss = self.loss(new_video, frame2)
-        # mask = flow != 0
-        # loss = ((new_flow[mask] - flow[mask])**2).mean()
         self.log('train_loss', loss)
         return dict(loss=loss, predict=new_video.clamp(0, 1), target=frame2)
 
@@ -71,43 +67,15 @@ class FlowTrainer(pl.LightningModule):
 
     def validation_step(self, batch, batch_idx):
         frame1, frame2, times, gt_flow = batch
-        vid_all, flow_all = [frame1], []
-        for i, t in enumerate(torch.linspace(0, 1, self.data_step + 1)[1:-1]):
-            new_video, flow = self.forward(frame1, times, factor=t, gt_flow=gt_flow) \
-                              if self.write_gt_flow else \
-                              self.forward(frame1, times, factor=t)
-            vid_all.append(new_video)
-            if i == 0:
-                flow = torch.cat((flow/t, gt_flow), dim=-1).permute(0,2,3,1)
-                flow = flow.squeeze().cpu().numpy().clip(-10, 10)
-                flow_image = torch.tensor(flow2img(flow)).unsqueeze(0).permute(0,3,1,2)
-                flow_all.append(flow_image)
-        vid_all.append(frame2)
-        vid_all = torch.stack(vid_all).squeeze()
-        flow_all = torch.stack(flow_all).squeeze()
-        return dict(vid=vid_all, flow=flow_all)
+        flow = self.forward(frame1, times)
+        flow = torch.cat((flow, gt_flow), dim=-1).permute(0,2,3,1)
+        flow = flow.cpu().numpy().clip(-10, 10)
+        flow_img = torch.stack([torch.tensor(flow2img(f)) for f in flow]).permute(0,3,1,2)
+        return dict(flow=flow_img)
 
     def validation_epoch_end(self, outputs):
-        video = torch.cat([seq['vid'] for seq in outputs]).unsqueeze(0)
-        flow = torch.stack([seq['flow'] for seq in outputs]).unsqueeze(0)
-        self.logger.experiment.add_video('val_video', video, self.current_epoch)
-        self.logger.experiment.add_video('val_flow', flow, self.current_epoch)
-        if self.write_gt_flow:
-            print('Logging GT flow')
-            self.write_gt_flow = False
-
-    def on_test_start(self):
-        print('Start evaluation epoch')
-        self.write_gt_flow = False
-
-    def test_step(self, *args):
-        return self.validation_step(*args)
-
-    def test_epoch_end(self, outputs):
-        video = torch.cat([seq['vid'] for seq in outputs]).permute(0,2,3,1)
-        flow = torch.stack([seq['flow'] for seq in outputs]).permute(0,2,3,1)
-        io.write_video('interpolated.mp4', video.cpu()*255, fps=self.data_step)
-        io.write_video('flow.mp4', flow.cpu()*255, fps=1)
+        flow = torch.cat([seq['flow'] for seq in outputs], dim=0).unsqueeze(0)
+        self.logger.experiment.add_video('flow', flow, self.current_epoch)
 
     def configure_optimizers(self):
         return torch.optim.Adam(self.net.parameters(), lr=self.lr)
