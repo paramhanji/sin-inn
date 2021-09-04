@@ -33,6 +33,7 @@ class FlowTrainer(pl.LightningModule):
         self.resample = Resample2d()
         self.photo_loss = loss
         self.flow_scale = flow_scale
+        self.lr = self.args.lr
 
         self.psnr = metrics.PSNR()
 
@@ -47,7 +48,7 @@ class FlowTrainer(pl.LightningModule):
         return flow
 
     def on_train_start(self) -> None:
-        print(f'=== learning rate {self.args.lr} ===')
+        print(f'=== learning rate {self.lr} ===')
 
     def training_step(self, batch, batch_idx):
         frame1, frame2, times, gt_flow = batch
@@ -81,7 +82,7 @@ class FlowTrainer(pl.LightningModule):
                                         'epoch': self.current_epoch})
 
     def configure_optimizers(self):
-        return torch.optim.Adam(self.net.parameters(), lr=self.args.lr)
+        return torch.optim.Adam(self.net.parameters(), lr=self.lr)
 
     def smooth_loss(self, img, flow, abs_fun, order=1):
         '''

@@ -24,12 +24,12 @@ def get_args():
     parser.add_argument('--size', default=200, type=int)
     parser.add_argument('--batch', default=8, type=int)
     # Train options
-    parser.add_argument('--epochs', default=10000, type=int)
-    parser.add_argument('--log-iter', default=1000, type=int)
+    parser.add_argument('--epochs', default=5000, type=int)
+    parser.add_argument('--log-iter', default=200, type=int)
     parser.add_argument('--lr', default=1e-4, type=float)
     parser.add_argument('--logger', default=None, choices=['wandb', None])
     parser.add_argument('--loss-photo', default=1, type=float)
-    parser.add_argument('--loss-smooth1', default=2.5, type=float)
+    parser.add_argument('--loss-smooth1', default=1/10, type=float)
     parser.add_argument('--edge-constant', default=150, type=float)
     parser.add_argument('--edge-func', default='exp', choices=['exp','gauss'])
     return parser.parse_args()
@@ -45,11 +45,13 @@ def train_model(video, logger, ckpt, args):
 
     model = T.FlowTrainer(args, loss=F.l1_loss, flow_scale=dataset.flow.max().item())
     trainer = pl.Trainer(gpus=1, logger=logger, max_epochs=args.epochs,
-                         callbacks=clbcks,
+                         callbacks=clbcks, auto_lr_find=True,
                          resume_from_checkpoint=ckpt,
                          check_val_every_n_epoch=args.log_iter,
                          num_sanity_val_steps=0)
     with ipdb.launch_ipdb_on_exception():
+        if ckpt is None:
+            trainer.tune(model, video)
         trainer.fit(model, video)
 
 def plot_fit(video, ckpt):
