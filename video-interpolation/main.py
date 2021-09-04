@@ -29,8 +29,9 @@ def get_args():
     parser.add_argument('--lr', default=1e-4, type=float)
     parser.add_argument('--logger', default=None, choices=['wandb', None])
     parser.add_argument('--loss-photo', default=1, type=float)
-    parser.add_argument('--loss-smooth1', default=4, type=float)
-    parser.add_argument('--edge_constant', default=150, type=float)
+    parser.add_argument('--loss-smooth1', default=2.5, type=float)
+    parser.add_argument('--edge-constant', default=150, type=float)
+    parser.add_argument('--edge-func', default='exp', choices=['exp','gauss'])
     return parser.parse_args()
 
 def train_model(video, logger, ckpt, args):

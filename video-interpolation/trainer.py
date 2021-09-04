@@ -55,13 +55,13 @@ class FlowTrainer(pl.LightningModule):
         new_video = self.resample(frame2.contiguous(), flow.contiguous())
 
         photometric_loss = self.photo_loss(new_video, frame1)
-        first_smoothness_loss = self.smooth_loss(frame1, flow)
+        first_smoothness_loss = self.smooth_loss(frame1, flow, self.args.edge_func)
 
         loss = self.args.loss_photo * photometric_loss + \
                self.args.loss_smooth1 * first_smoothness_loss
         self.log('train/loss', loss.detach(), on_step=True, on_epoch=False)
 
-        epe = torch.sum((flow - gt_flow)**2).sqrt().detach()
+        epe = torch.sum((flow - gt_flow)**2, dim=1).sqrt().mean().detach()
         psnr = self.psnr(frame2, new_video).detach()
         self.log('metric', {'EPE': epe, 'PSNR': psnr}, on_step=False, on_epoch=True)
         return loss
@@ -83,15 +83,15 @@ class FlowTrainer(pl.LightningModule):
     def configure_optimizers(self):
         return torch.optim.Adam(self.net.parameters(), lr=self.args.lr)
 
-    def smooth_loss(self, img, flow, abs_fun='exp', order=1, num_pairs=1):
+    def smooth_loss(self, img, flow, abs_fun, order=1):
         '''
         First and second order smoothness loss
         Reference: https://github.com/google-research/google-research/
                    blob/235feb2b42f3a56e1e8ed9269186c696c1cecda1/uflow/uflow_utils.py#L743
         '''
         if abs_fun == 'exp':
-            abs_fun = torch.exp
-        elif abs_fun == 'gaus':
+            abs_fun = torch.abs
+        elif abs_fun == 'gauss':
             abs_fun = lambda x: x**2
 
         img_gx, img_gy = image_grads(img)
@@ -99,4 +99,4 @@ class FlowTrainer(pl.LightningModule):
         w_x = torch.exp(-abs_fun(self.args.edge_constant * img_gx).mean(dim=1)).unsqueeze(1)
         w_y = torch.exp(-abs_fun(self.args.edge_constant * img_gy).mean(dim=1)).unsqueeze(1)
 
-        return ((w_x*robust_l1(flow_gx)).mean() + (w_y*robust_l1(flow_gy)).mean()) / 2 / num_pairs
+        return ((w_x*robust_l1(flow_gx)).mean() + (w_y*robust_l1(flow_gy)).mean()) / 2
