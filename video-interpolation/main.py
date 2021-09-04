@@ -9,45 +9,52 @@ from math import ceil
 import torch
 import torch.nn.functional as F
 import pytorch_lightning as pl
-from pytorch_lightning.loggers import TensorBoardLogger
+import wandb
+from pytorch_lightning.loggers import WandbLogger
 from pytorch_lightning.callbacks import ModelCheckpoint
 
 def get_args():
     parser = argparse.ArgumentParser()
     parser.add_argument('operation', choices=['train', 'plot'])
     # Data options
-    parser.add_argument('--input-video', default='../datasets/dancing.mp4')
+    parser.add_argument('--input-video', required=True)
+    parser.add_argument('--name', required=True)
     parser.add_argument('--end', default=450, type=int)
-    parser.add_argument('--step', default=10, type=int)
+    parser.add_argument('--step', default=1, type=int)
     parser.add_argument('--size', default=200, type=int)
-    parser.add_argument('--batch', default=16, type=int)
+    parser.add_argument('--batch', default=8, type=int)
     # Train options
     parser.add_argument('--epochs', default=10000, type=int)
     parser.add_argument('--log-iter', default=1000, type=int)
     parser.add_argument('--lr', default=1e-4, type=float)
+    parser.add_argument('--logger', default=None, choices=['wandb', None])
     return parser.parse_args()
 
 def train_model(video, logger, ckpt, args):
-    dataset = video.testset
-    if ckpt is None:
-        logger.experiment.add_video('source', dataset.video.unsqueeze(0), 0)
+    dataset = video.dataset
+    ckpt_dir = path.dirname(ckpt)
+    if not path.isfile(ckpt) and logger:
+        if logger:
+            logger.experiment.log({'source': wandb.Video((dataset.video * 255).type(torch.uint8))})
+            logger.log_hyperparams(args)
+        ckpt = None
 
-    model = T.FlowTrainer(loss=F.l1_loss, lr=args.lr, step=args.step,
+    model = T.FlowTrainer(loss=F.l1_loss, lr=args.lr,
                           flow_scale=dataset.flow.max().item())
     trainer = pl.Trainer(gpus=1, logger=logger, max_epochs=args.epochs,
-                         callbacks=[ModelCheckpoint(every_n_epochs=args.epochs//100)],
+                         callbacks=[ModelCheckpoint(every_n_epochs=args.epochs//100, dirpath=ckpt_dir)],
                          resume_from_checkpoint=ckpt,
                          check_val_every_n_epoch=args.log_iter,
-                         num_sanity_val_steps=ceil(len(dataset)/args.batch))
+                         num_sanity_val_steps=0)
     with ipdb.launch_ipdb_on_exception():
         trainer.fit(model, video)
 
-def plot_fit(video, ckpt, step):
+def plot_fit(video, ckpt):
     import matplotlib.pyplot as plt
     figure = plt.gcf()
     figure.set_size_inches(16, 12)
     dataset = video.testset
-    model = T.FlowTrainer.load_from_checkpoint(ckpt, step=step,
+    model = T.FlowTrainer.load_from_checkpoint(ckpt,
                                                flow_scale=dataset.flow.max().item())
     model.eval()
     with torch.no_grad():
@@ -75,12 +82,21 @@ def plot_fit(video, ckpt, step):
 
 if __name__ == "__main__":
     args = get_args()
-    video_clip = D.VideoModule(args.input_video, 0, args.end, step=args.step, batch=args.batch, size=args.size)
+    if path.isdir(path.join(args.input_video)):
+        print('Loading MPI sintel sequence')
+        video_clip = D.ImagesModule(args.input_video, size=args.size, batch=args.batch)
+    else:
+        print('Extracting frames from video')
+        video_clip = D.VideoModule(args.input_video, 0, args.end, step=args.step, batch=args.batch, size=args.size)
     scene, _ = path.splitext(path.basename(args.input_video))
-    logger = TensorBoardLogger('logs', name=scene, version=f'{args.step}_step_unsup')
-    latest_ckpt = max(glob(f'{logger.save_dir}/{logger.name}/{logger.version}/checkpoints/*.ckpt'),
-                      key=path.getmtime, default=None)
+    logger, latest_ckpt = None, None
+    if args.logger == 'wandb':
+        unique_name = f'{scene}_{args.step}_{args.name}'
+        logger = WandbLogger(project='optical_flow', name=unique_name)
+        latest_ckpt = max(glob(path.join('checkpoints', unique_name, '*.ckpt')),
+                          key=path.getmtime, default=path.join('checkpoints', unique_name,'temp'))
+
     if args.operation == 'train':
         train_model(video_clip, logger, latest_ckpt, args)
     elif args.operation == 'plot':
-        plot_fit(video_clip, latest_ckpt, args.step)
+        plot_fit(video_clip, latest_ckpt)

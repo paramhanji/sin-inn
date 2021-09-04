@@ -1,36 +1,30 @@
-from torch import Tensor
-import torch
+import numpy as np, torch
 import torch.utils.data as data
 import torchvision.io as io
 import torchvision
 import torchvision.transforms as T
 import pytorch_lightning as pl
-import os.path as path
-
 torchvision.set_video_backend('pyav')
+import os.path as path
+import abc
 
-class VideoClip(data.Dataset):
-    def __init__(self, video, start, duration, size=200, step=10):
-        super().__init__()
-        self.step = step
-        self.read_video(video, start, start+duration, step, size)
-        self.T = torch.linspace(-1, 1, self.video.size(0))
-
-    def read_video(self, video_path, start, end, step, size):
-        self.video, _, infos = io.read_video(video_path, start_pts=start, end_pts=end, pts_unit='sec')
-        self.video = self.video[::step]
-        self.video = self.video.permute(0, 3, 1, 2).contiguous() / 255
-        self.video = T.Resize(size)(self.video)
-
+class BaseMedia(abc.ABC, data.Dataset):
     def __len__(self):
         return self.video.size(0) - 1
 
     def __getitem__(self, index):
-        return self.video[index], self.video[index+1], self.T[index]
+        return self.video[index], self.video[index+1], self.T[index], self.flow[index]
 
-class VideoClipFlow(VideoClip):
-    def __init__(self, video, start, duration, size=200, step=10):
-        super().__init__(video, start, duration, size, step)
+class VideoClip(BaseMedia):
+    def __init__(self, path, start, duration, size=200, step=10):
+        super().__init__()
+        self.step = step
+        self.read_video(path, start, start+duration, step, size)
+        self.video, _, infos = io.read_video(path, start_pts=start, end_pts=start+duration,
+                                             pts_unit='sec')
+        self.video = self.video[::step].permute(0,3,1,2) / 255
+        self.video = T.Resize(size)(self.video)
+        self.T = torch.linspace(-1, 1, self.video.size(0))
         self.run_raft()
 
     def run_raft(self, raft_path='/auto/homes/pmh64/projects/RAFT', thresh=1):
@@ -57,34 +51,70 @@ class VideoClipFlow(VideoClip):
                 im1, im2 = (im1*255)[None].to('cuda'), (im2*255)[None].to('cuda')
                 padder = InputPadder(im1.shape)
                 im1, im2 = padder.pad(im1, im2)
-                # _, flow1 = model(im1, im2, iters=20, test_mode=True)
-                _, flow2 = model(im2, im1, iters=20, test_mode=True)
+                _, flow = model(im1, im2, iters=20, test_mode=True)
 
-                flow2 = padder.unpad(flow2)[0].cpu()
-                # coords0 = coords_grid(1, im1.shape[2], im1.shape[3]).to('cuda')
-                # coords1 = coords0 + flow1
-                # coords2 = coords1 + bilinear_sampler(flow2, coords1.permute(0,2,3,1))
-                # err = (coords0 - coords2).norm(dim=1)
-                # occ = (err[0] > thresh)
-                # flow2 = padder.unpad(flow2 * torch.logical_not(occ[None,None]))[0].cpu()
-                self.flow.append(flow2)
+                flow = padder.unpad(flow)[0].cpu()
+                self.flow.append(flow)
 
         self.flow = torch.stack(self.flow)
         sys.path.pop()
 
-    def __getitem__(self, index):
-        return self.video[index], self.video[index+1], self.T[index], self.flow[index]
-
-
 class VideoModule(pl.LightningDataModule):
     def __init__(self, file: str, start, duration, size=200, step=10, batch=8):
         super().__init__()
-        self.trainset = VideoClip(file, start, duration, size=size, step=step)
-        self.testset = VideoClipFlow(file, start, duration, size=size, step=step)
+        self.dataset = VideoClip(file, start, duration, size=size, step=step)
         self.batch = batch
     def train_dataloader(self) -> data.DataLoader:
-        return data.DataLoader(self.trainset, batch_size=self.batch)
+        return data.DataLoader(self.dataset, batch_size=self.batch)
     def val_dataloader(self) -> data.DataLoader:
-        return data.DataLoader(self.testset, batch_size=1)
+        return data.DataLoader(self.dataset, batch_size=1)
     def test_dataloader(self) -> data.DataLoader:
-        return data.DataLoader(self.testset, batch_size=1)
+        return data.DataLoader(self.dataset, batch_size=1)
+
+
+class Images(BaseMedia):
+    def __init__(self, root, size=200):
+        super().__init__()
+        frames = [path.join(root, f'frame_{i+1:04d}.png') for i in range(50)]
+        trans = T.Compose([lambda x: io.read_image(x) / 255, T.Resize(size)])
+        self.video = torch.stack([trans(f) for f in frames])
+        self.T = torch.linspace(-1, 1, self.video.size(0))
+
+        scene, _ = path.splitext(path.basename(root))
+        flows = [self.readFlow(path.join(root, '../../flow', scene, f'frame_{i+1:04d}.flo'))
+                 for i in range(49)]
+        trans = T.Compose([lambda x: torch.tensor(x).permute(2,0,1), T.Resize(size)])
+        self.flow = torch.stack([trans(f) for f in flows])
+
+    def readFlow(self, fn):
+        """ Read .flo file in Middlebury format"""
+        # Code adapted from:
+        # http://stackoverflow.com/questions/28013200/reading-middlebury-flow-files-with-python-bytes-array-numpy
+
+        # WARNING: this will work on little-endian architectures (eg Intel x86) only!
+        # print 'fn = %s'%(fn)
+        with open(fn, 'rb') as f:
+            magic = np.fromfile(f, np.float32, count=1)
+            if 202021.25 != magic:
+                print('Magic number incorrect. Invalid .flo file')
+                return None
+            else:
+                w = np.fromfile(f, np.int32, count=1)
+                h = np.fromfile(f, np.int32, count=1)
+                # print 'Reading %d x %d flo file\n' % (w, h)
+                data = np.fromfile(f, np.float32, count=2*int(w)*int(h))
+                # Reshape data into 3D array (columns, rows, bands)
+                # The reshape here is for visualization, the original code is (w,h,2)
+                return np.resize(data, (int(h), int(w), 2))
+
+class ImagesModule(pl.LightningDataModule):
+    def __init__(self, dir, size=200, batch=8):
+        super().__init__()
+        self.dataset = Images(dir, size=size)
+        self.batch = batch
+    def train_dataloader(self) -> data.DataLoader:
+        return data.DataLoader(self.dataset, batch_size=self.batch)
+    def val_dataloader(self) -> data.DataLoader:
+        return data.DataLoader(self.dataset, batch_size=1)
+    def test_dataloader(self) -> data.DataLoader:
+        return data.DataLoader(self.dataset, batch_size=1)

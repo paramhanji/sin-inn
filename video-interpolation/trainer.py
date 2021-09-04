@@ -8,6 +8,7 @@ from model import MLP
 import torchmetrics as metrics
 from typing import Union, Tuple
 import torchvision.io as io
+import wandb
 
 from my_utils.resample2d import Resample2d
 from my_utils.flow_viz import flow2img
@@ -28,12 +29,10 @@ class FlowTrainer(pl.LightningModule):
     def __init__(self, loss=None, lr=None, step=None, flow_scale=None):
         super().__init__()
 
-        self.save_hyperparameters()
         self.net = net(3, 'siren', out_channels=2)
         self.resample = Resample2d()
         self.loss = loss
         self.lr = lr
-        self.data_step = step
         self.flow_scale = flow_scale
 
         self.psnr = metrics.PSNR()
@@ -50,23 +49,22 @@ class FlowTrainer(pl.LightningModule):
 
     def on_train_start(self) -> None:
         print(f'=== learning rate {self.lr} ===')
-        self.write_gt_flow = True
 
     def training_step(self, batch, batch_idx):
-        frame1, frame2, times = batch
+        frame1, frame2, times, gt_flow = batch
         flow = self.forward(frame1, times)
-        new_video = self.resample(frame1.contiguous(), flow.contiguous())
-        loss = self.loss(new_video, frame2)
-        self.log('train_loss', loss)
-        return dict(loss=loss, predict=new_video.clamp(0, 1), target=frame2)
-
-    def training_step_end(self, outputs):
-        self.logger.experiment.add_scalar('Loss', outputs['loss'], self.global_step)
-        self.logger.experiment.add_scalar('PSNR', self.psnr(outputs['target'],outputs['predict']), self.global_step)
-        return outputs['loss']
+        new_video = self.resample(frame2.contiguous(), flow.contiguous())
+        loss = self.loss(new_video, frame1)
+        # self.logger.experiment.add_scalar('loss', loss, self.global_step)
+        self.log('loss', loss, on_step=True, on_epoch=False)
+        epe = torch.sum((flow - gt_flow)**2).sqrt()
+        self.log('EPE', epe, on_step=False, on_epoch=True)
+        psnr = self.psnr(frame2, new_video)
+        self.log('PSNR', psnr, on_step=False, on_epoch=True)
+        return loss
 
     def validation_step(self, batch, batch_idx):
-        frame1, frame2, times, gt_flow = batch
+        frame1, _, times, gt_flow = batch
         flow = self.forward(frame1, times)
         flow = torch.cat((flow, gt_flow), dim=-1).permute(0,2,3,1)
         flow = flow.cpu().numpy().clip(-10, 10)
@@ -75,7 +73,9 @@ class FlowTrainer(pl.LightningModule):
 
     def validation_epoch_end(self, outputs):
         flow = torch.cat([seq['flow'] for seq in outputs], dim=0).unsqueeze(0)
-        self.logger.experiment.add_video('flow', flow, self.current_epoch)
+        if self.logger:
+            self.logger.experiment.log({'flow': wandb.Video(flow.type(torch.uint8)),
+                                        'epoch': self.current_epoch})
 
     def configure_optimizers(self):
         return torch.optim.Adam(self.net.parameters(), lr=self.lr)

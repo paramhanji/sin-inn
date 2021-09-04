@@ -145,3 +145,8 @@ experiments/
 .vscode/
 
 logs/
+
+wandb/
+
+checkpoints/
+
