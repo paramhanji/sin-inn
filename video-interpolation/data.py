@@ -65,7 +65,7 @@ class VideoModule(pl.LightningDataModule):
         self.dataset = VideoClip(file, start, duration, size=size, step=step)
         self.batch = batch
     def train_dataloader(self) -> data.DataLoader:
-        return data.DataLoader(self.dataset, batch_size=self.batch)
+        return data.DataLoader(self.dataset, batch_size=self.batch, shuffle=True)
     def val_dataloader(self) -> data.DataLoader:
         return data.DataLoader(self.dataset, batch_size=1)
     def test_dataloader(self) -> data.DataLoader:
@@ -87,12 +87,13 @@ class Images(BaseMedia):
         self.flow = torch.stack([trans(f) for f in flows])
 
     def readFlow(self, fn):
-        """ Read .flo file in Middlebury format"""
-        # Code adapted from:
-        # http://stackoverflow.com/questions/28013200/reading-middlebury-flow-files-with-python-bytes-array-numpy
+        '''
+        Read .flo file in Middlebury format
+        Reference: http://stackoverflow.com/questions/
+                   28013200/reading-middlebury-flow-files-with-python-bytes-array-numpy
 
-        # WARNING: this will work on little-endian architectures (eg Intel x86) only!
-        # print 'fn = %s'%(fn)
+        WARNING: this will work on little-endian architectures (eg Intel x86) only!
+        '''
         with open(fn, 'rb') as f:
             magic = np.fromfile(f, np.float32, count=1)
             if 202021.25 != magic:
@@ -113,7 +114,7 @@ class ImagesModule(pl.LightningDataModule):
         self.dataset = Images(dir, size=size)
         self.batch = batch
     def train_dataloader(self) -> data.DataLoader:
-        return data.DataLoader(self.dataset, batch_size=self.batch)
+        return data.DataLoader(self.dataset, batch_size=self.batch, shuffle=True)
     def val_dataloader(self) -> data.DataLoader:
         return data.DataLoader(self.dataset, batch_size=1)
     def test_dataloader(self) -> data.DataLoader:

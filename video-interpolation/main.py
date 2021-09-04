@@ -28,21 +28,23 @@ def get_args():
     parser.add_argument('--log-iter', default=1000, type=int)
     parser.add_argument('--lr', default=1e-4, type=float)
     parser.add_argument('--logger', default=None, choices=['wandb', None])
+    parser.add_argument('--loss-photo', default=1, type=float)
+    parser.add_argument('--loss-smooth1', default=4, type=float)
+    parser.add_argument('--edge_constant', default=150, type=float)
     return parser.parse_args()
 
 def train_model(video, logger, ckpt, args):
     dataset = video.dataset
-    ckpt_dir = path.dirname(ckpt)
-    if not path.isfile(ckpt) and logger:
-        if logger:
-            logger.experiment.log({'source': wandb.Video((dataset.video * 255).type(torch.uint8))})
-            logger.log_hyperparams(args)
+    clbcks = [ModelCheckpoint(every_n_epochs=args.epochs//100, dirpath=path.dirname(ckpt))] \
+              if ckpt else []
+    if ckpt and not path.isfile(ckpt):
+        logger.experiment.log({'source': wandb.Video((dataset.video * 255).type(torch.uint8))})
+        logger.log_hyperparams(args)
         ckpt = None
 
-    model = T.FlowTrainer(loss=F.l1_loss, lr=args.lr,
-                          flow_scale=dataset.flow.max().item())
+    model = T.FlowTrainer(args, loss=F.l1_loss, flow_scale=dataset.flow.max().item())
     trainer = pl.Trainer(gpus=1, logger=logger, max_epochs=args.epochs,
-                         callbacks=[ModelCheckpoint(every_n_epochs=args.epochs//100, dirpath=ckpt_dir)],
+                         callbacks=clbcks,
                          resume_from_checkpoint=ckpt,
                          check_val_every_n_epoch=args.log_iter,
                          num_sanity_val_steps=0)
