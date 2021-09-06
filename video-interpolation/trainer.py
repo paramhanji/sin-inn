@@ -19,9 +19,9 @@ def net(in_channels, activation, out_channels=3):
         in_channels,
         out_channels=out_channels,
         hidden_dim=256,
-        # hidden_dim=512,
+        # hidden_dim=375,
         hidden_layers=3,
-        # hidden_layers=4,
+        # hidden_layers=5,
         activation=activation)
 
 
@@ -46,9 +46,6 @@ class FlowTrainer(pl.LightningModule):
         poses = torch.stack((gridT, gridH, gridW), dim=-1).view(-1, 3)
         flow = self.net(poses).view(t, h, w, 2).permute(0, 3, 1, 2) * self.flow_scale
         return flow
-
-    def on_train_start(self) -> None:
-        print(f'=== learning rate {self.lr} ===')
 
     def training_step(self, batch, batch_idx):
         frame1, frame2, times, gt_flow = batch

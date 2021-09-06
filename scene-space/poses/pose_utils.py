@@ -25,6 +25,7 @@ def run_colmap(basedir, match_type):
     matcher_args = [
         colmap_exe, match_type, 
             '--database_path', os.path.join(basedir, 'database.db'), 
+            # '--SiftMatching.use_gpu', '0',
     ]
 
     match_output = ( subprocess.check_output(matcher_args, universal_newlines=True) )
@@ -51,7 +52,7 @@ def run_colmap(basedir, match_type):
 
     p = os.path.join(basedir, 'dense')
     if not os.path.exists(p):
-        os.makedir(p)
+        os.mkdir(p)
 
     undistorter_args = [
         colmap_exe, 'image_undistorter',

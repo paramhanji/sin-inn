@@ -29,9 +29,9 @@ def get_args():
     parser.add_argument('--lr', default=1e-4, type=float)
     parser.add_argument('--logger', default=None, choices=['wandb', None])
     parser.add_argument('--loss-photo', default=1, type=float)
-    parser.add_argument('--loss-smooth1', default=1/10, type=float)
+    parser.add_argument('--loss-smooth1', default=0.1, type=float)
     parser.add_argument('--edge-constant', default=150, type=float)
-    parser.add_argument('--edge-func', default='exp', choices=['exp','gauss'])
+    parser.add_argument('--edge-func', default='gauss', choices=['exp','gauss'])
     return parser.parse_args()
 
 def train_model(video, logger, ckpt, args):
@@ -40,7 +40,6 @@ def train_model(video, logger, ckpt, args):
               if ckpt else []
     if ckpt and not path.isfile(ckpt):
         logger.experiment.log({'source': wandb.Video((dataset.video * 255).type(torch.uint8))})
-        logger.log_hyperparams(args)
         ckpt = None
 
     model = T.FlowTrainer(args, loss=F.l1_loss, flow_scale=dataset.flow.max().item())
@@ -52,6 +51,9 @@ def train_model(video, logger, ckpt, args):
     with ipdb.launch_ipdb_on_exception():
         if ckpt is None:
             trainer.tune(model, video)
+        args.lr = model.lr
+        if logger:
+            logger.log_hyperparams(args)
         trainer.fit(model, video)
 
 def plot_fit(video, ckpt):
@@ -59,8 +61,7 @@ def plot_fit(video, ckpt):
     figure = plt.gcf()
     figure.set_size_inches(16, 12)
     dataset = video.testset
-    model = T.FlowTrainer.load_from_checkpoint(ckpt,
-                                               flow_scale=dataset.flow.max().item())
+    model = T.FlowTrainer.load_from_checkpoint(ckpt, flow_scale=dataset.flow.max().item())
     model.eval()
     with torch.no_grad():
         t, _, h, w = dataset.video.shape
