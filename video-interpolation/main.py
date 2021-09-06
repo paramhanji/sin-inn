@@ -17,7 +17,7 @@ def get_args():
     parser = argparse.ArgumentParser()
     parser.add_argument('operation', choices=['train', 'plot'])
     # Data options
-    parser.add_argument('--input-video', required=True)
+    parser.add_argument('--input-video', default='../datasets/sintel/training/final/alley_1')
     parser.add_argument('--name', required=True)
     parser.add_argument('--end', default=450, type=int)
     parser.add_argument('--step', default=1, type=int)
@@ -30,6 +30,7 @@ def get_args():
     parser.add_argument('--logger', default=None, choices=['wandb', None])
     parser.add_argument('--loss-photo', default=1, type=float)
     parser.add_argument('--loss-smooth1', default=0.1, type=float)
+    parser.add_argument('--loss-smooth2', default=0.2, type=float)
     parser.add_argument('--edge-constant', default=150, type=float)
     parser.add_argument('--edge-func', default='gauss', choices=['exp','gauss'])
     return parser.parse_args()

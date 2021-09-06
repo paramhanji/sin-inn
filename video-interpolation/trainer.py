@@ -1,15 +1,9 @@
 import torch
-import torch.nn as nn
-import torch.nn.functional as F
-import torch.utils.data as data
 import pytorch_lightning as pl
-from torch.functional import Tensor
-from model import MLP
 import torchmetrics as metrics
-from typing import Union, Tuple
-import torchvision.io as io
 import wandb
 
+from model import MLP
 from my_utils.resample2d import Resample2d
 from my_utils.flow_viz import flow2img
 from my_utils.utils import *
@@ -37,7 +31,7 @@ class FlowTrainer(pl.LightningModule):
 
         self.psnr = metrics.PSNR()
 
-    def forward(self, F: Tensor, T: Tensor):
+    def forward(self, F, T):
         _, _, h, w = F.shape
         t = T.size(0)
         H = torch.linspace(-1, 1, h).to(T)
@@ -52,11 +46,11 @@ class FlowTrainer(pl.LightningModule):
         flow = self.forward(frame1, times)
         new_video = self.resample(frame2.contiguous(), flow.contiguous())
 
-        photometric_loss = self.photo_loss(new_video, frame1)
-        first_smoothness_loss = self.smooth_loss(frame1, flow, self.args.edge_func)
+        photo_loss = self.photo_loss(new_video, frame1)
+        smooth1_loss = self.smooth_loss(frame1, flow, self.args.edge_func)
+        smooth2_loss = self.smooth_loss(frame1, flow, self.args.edge_func, order=2)
 
-        loss = self.args.loss_photo * photometric_loss + \
-               self.args.loss_smooth1 * first_smoothness_loss
+        loss = self.args.loss_photo*photo_loss + self.args.loss_smooth1*smooth1_loss + self.args.loss_smooth2*smooth2_loss
         self.log('train/loss', loss.detach(), on_step=True, on_epoch=False)
 
         epe = torch.sum((flow - gt_flow)**2, dim=1).sqrt().mean().detach()
@@ -92,9 +86,14 @@ class FlowTrainer(pl.LightningModule):
         elif abs_fun == 'gauss':
             abs_fun = lambda x: x**2
 
-        img_gx, img_gy = image_grads(img)
+        img_gx, img_gy = image_grads(img, stride=order)
         flow_gx, flow_gy = image_grads(flow)
         w_x = torch.exp(-abs_fun(self.args.edge_constant * img_gx).mean(dim=1)).unsqueeze(1)
         w_y = torch.exp(-abs_fun(self.args.edge_constant * img_gy).mean(dim=1)).unsqueeze(1)
 
-        return ((w_x*robust_l1(flow_gx)).mean() + (w_y*robust_l1(flow_gy)).mean()) / 2
+        if order == 1:
+            return ((w_x*robust_l1(flow_gx)).mean() + (w_y*robust_l1(flow_gy)).mean()) / 2
+        else:
+            flow_gxx, _ = image_grads(flow_gx)
+            _, flow_gyy = image_grads(flow_gy)
+            return ((w_x*robust_l1(flow_gxx)).mean() + (w_y*robust_l1(flow_gyy)).mean()) / 2
