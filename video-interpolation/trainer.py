@@ -30,7 +30,7 @@ class FlowTrainer(pl.LightningModule):
         self.lr = self.args.lr
         self.occlusion = occlusion_brox if args.occl == 'brox' else occlusion_unity
         if args.loss_photo == 'l1':
-            self.photometric = L.L1Loss()
+            self.photometric = L.L1Loss(lambda_reg=args.occl_lambda)
         self.smooth1 = L.BaseLoss() if args.loss_smooth1 == 0 else \
                        L.BilateralSmooth(args.edge_func, args.edge_constant, 1, args.loss_smooth1)
         self.smooth2 = L.BaseLoss() if args.loss_smooth2 == 0 else \
@@ -71,16 +71,20 @@ class FlowTrainer(pl.LightningModule):
 
     def validation_step(self, batch, batch_idx):
         frame1, _, times, gt_flow = batch
-        flow, _ = self.forward(frame1, times)
-        flow = torch.cat((flow, gt_flow), dim=-1).permute(0,2,3,1)
-        flow = flow.cpu().numpy().clip(-10, 10)
-        flow_img = torch.stack([torch.tensor(flow2img(f)) for f in flow]).permute(0,3,1,2)
-        return dict(flow=flow_img)
+        flow_fw, flow_bw = self.forward(frame1, times)
+        mask = (self.occlusion(flow_fw, flow_bw).type(torch.uint8) * 255).cpu()
+        flow_cat = torch.cat((flow_fw, gt_flow), dim=-1).permute(0,2,3,1)
+        flow_cat = flow_cat.cpu().numpy().clip(-10, 10)
+        flow_img = torch.stack([torch.tensor(flow2img(f)) for f in flow_cat]).permute(0,3,1,2)
+        return dict(flow=flow_img, mask=mask)
 
     def validation_epoch_end(self, outputs):
-        flow = torch.cat([seq['flow'] for seq in outputs], dim=0).unsqueeze(0)
+        flows = torch.cat([seq['flow'] for seq in outputs], dim=0).unsqueeze(0)
+        masks = torch.cat([seq['mask'] for seq in outputs], dim=0).unsqueeze(0)
         if self.logger:
-            self.logger.experiment.log({'flow': wandb.Video(flow.type(torch.uint8)),
+            self.logger.experiment.log({'flow': wandb.Video(flows.type(torch.uint8)),
+                                        'epoch': self.current_epoch})
+            self.logger.experiment.log({'occlusion_mask': wandb.Video(masks),
                                         'epoch': self.current_epoch})
 
     def configure_optimizers(self):

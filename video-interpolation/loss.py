@@ -14,13 +14,15 @@ class BaseLoss(torch.nn.Module):
 
 class L1Loss(BaseLoss):
     """Wrapper for torch.nn.l1 to use occlusion mask"""
-    def __init__(self, weight=1):
+    def __init__(self, lambda_reg, weight=1):
         super().__init__(weight)
+        self.lambda_reg = lambda_reg
 
     def forward(self, im1, im2, mask):
         if mask.dtype == torch.bool:
             return torch.nn.functional.l1_loss(torch.masked_select(im1, mask),
-                                               torch.masked_select(im2, mask)) * self.weight
+                                               torch.masked_select(im2, mask)) * self.weight + \
+                   torch.logical_not(mask).sum() / mask.numel() * self.lambda_reg
         else:
             # Soft mask requires matrix multiplication with separate num and denom
             raise NotImplementedError

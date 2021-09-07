@@ -28,7 +28,7 @@ def occlusion_brox(orig_fw, orig_bw):
     warped_bw = resample(orig_bw.contiguous(), orig_fw.contiguous())
     sq_sum = ((orig_fw + warped_bw)**2).sum(dim=1)
     sum_sq = (orig_fw**2 + warped_bw**2).sum(dim=1)
-    return (sq_sum <= 0.01 * sum_sq + 0.5).unsqueeze(1)
+    return (sq_sum >= 0.01 * sum_sq + 0.5).unsqueeze(1)
 
 def occlusion_wang(bw_flow, threshold=False):
     """Range-map occlusion"""

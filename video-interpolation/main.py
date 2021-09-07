@@ -33,7 +33,8 @@ def get_args():
     parser.add_argument('--loss-smooth2', default=0, type=float)
     parser.add_argument('--edge-constant', default=150, type=float)
     parser.add_argument('--edge-func', default='gauss', choices=['exp','gauss'])
-    parser.add_argument('--occl', default=None, choices=['brox', None])
+    parser.add_argument('--occl', default='brox', choices=['brox', None])
+    parser.add_argument('--occl-lambda', default=1, type=float)
     return parser.parse_args()
 
 def train_model(video, logger, ckpt, args):
