@@ -4,6 +4,7 @@ import torchmetrics as metrics
 import wandb
 
 from model import MLP
+import loss as L
 from my_utils.resample2d import Resample2d
 from my_utils.flow_viz import flow2img
 from my_utils.utils import *
@@ -20,14 +21,20 @@ def net(in_channels, activation, out_channels=3):
 
 
 class FlowTrainer(pl.LightningModule):
-    def __init__(self, args, loss=None, flow_scale=None):
+    def __init__(self, args, flow_scale=None):
         super().__init__()
         self.args = args
-        self.net = net(3, 'siren', out_channels=2)
+        self.net = net(3, 'siren', out_channels=4)
         self.resample = Resample2d()
-        self.photo_loss = loss
         self.flow_scale = flow_scale
         self.lr = self.args.lr
+        self.occlusion = occlusion_brox if args.occl == 'brox' else occlusion_unity
+        if args.loss_photo == 'l1':
+            self.photometric = L.L1Loss()
+        self.smooth1 = L.BaseLoss() if args.loss_smooth1 == 0 else \
+                       L.BilateralSmooth(args.edge_func, args.edge_constant, 1, args.loss_smooth1)
+        self.smooth2 = L.BaseLoss() if args.loss_smooth2 == 0 else \
+                       L.BilateralSmooth(args.edge_func, args.edge_constant, 2, args.loss_smooth2)
 
         self.psnr = metrics.PSNR()
 
@@ -38,29 +45,33 @@ class FlowTrainer(pl.LightningModule):
         W = torch.linspace(-1, 1, w).to(T)
         gridT, gridH, gridW = torch.meshgrid(T, H, W)
         poses = torch.stack((gridT, gridH, gridW), dim=-1).view(-1, 3)
-        flow = self.net(poses).view(t, h, w, 2).permute(0, 3, 1, 2) * self.flow_scale
-        return flow
+        flows = self.net(poses).view(t, h, w, 4).permute(0, 3, 1, 2) * self.flow_scale
+        return flows[:,:2], flows[:,2:]
 
     def training_step(self, batch, batch_idx):
         frame1, frame2, times, gt_flow = batch
-        flow = self.forward(frame1, times)
-        new_video = self.resample(frame2.contiguous(), flow.contiguous())
+        flow_fw, flow_bw = self.forward(frame1, times)
+        warped_fw = self.resample(frame2.contiguous(), flow_fw.contiguous())
+        warped_bw = self.resample(frame1.contiguous(), flow_bw.contiguous())
+        mask_fw = self.occlusion(flow_fw, flow_bw)
+        mask_bw = self.occlusion(flow_bw, flow_fw)
 
-        photo_loss = self.photo_loss(new_video, frame1)
-        smooth1_loss = self.smooth_loss(frame1, flow, self.args.edge_func)
-        smooth2_loss = self.smooth_loss(frame1, flow, self.args.edge_func, order=2)
+        photo_loss = self.photometric(warped_fw, frame1, mask_fw) \
+                     + self.photometric(warped_bw, frame2, mask_bw)
+        smooth1_loss = self.smooth1(frame1, flow_fw) + self.smooth1(frame2, flow_bw)
+        smooth2_loss = self.smooth2(frame1, flow_fw) + self.smooth2(frame2, flow_bw)
 
-        loss = self.args.loss_photo*photo_loss + self.args.loss_smooth1*smooth1_loss + self.args.loss_smooth2*smooth2_loss
+        loss = photo_loss + smooth1_loss + smooth2_loss
         self.log('train/loss', loss.detach(), on_step=True, on_epoch=False)
 
-        epe = torch.sum((flow - gt_flow)**2, dim=1).sqrt().mean().detach()
-        psnr = self.psnr(frame2, new_video).detach()
+        epe = torch.sum((flow_fw - gt_flow)**2, dim=1).sqrt().mean().detach()
+        psnr = self.psnr(warped_fw, frame1).detach()
         self.log('metric', {'EPE': epe, 'PSNR': psnr}, on_step=False, on_epoch=True)
         return loss
 
     def validation_step(self, batch, batch_idx):
         frame1, _, times, gt_flow = batch
-        flow = self.forward(frame1, times)
+        flow, _ = self.forward(frame1, times)
         flow = torch.cat((flow, gt_flow), dim=-1).permute(0,2,3,1)
         flow = flow.cpu().numpy().clip(-10, 10)
         flow_img = torch.stack([torch.tensor(flow2img(f)) for f in flow]).permute(0,3,1,2)
@@ -74,26 +85,3 @@ class FlowTrainer(pl.LightningModule):
 
     def configure_optimizers(self):
         return torch.optim.Adam(self.net.parameters(), lr=self.lr)
-
-    def smooth_loss(self, img, flow, abs_fun, order=1):
-        '''
-        First and second order smoothness loss
-        Reference: https://github.com/google-research/google-research/
-                   blob/235feb2b42f3a56e1e8ed9269186c696c1cecda1/uflow/uflow_utils.py#L743
-        '''
-        if abs_fun == 'exp':
-            abs_fun = torch.abs
-        elif abs_fun == 'gauss':
-            abs_fun = lambda x: x**2
-
-        img_gx, img_gy = image_grads(img, stride=order)
-        flow_gx, flow_gy = image_grads(flow)
-        w_x = torch.exp(-abs_fun(self.args.edge_constant * img_gx).mean(dim=1)).unsqueeze(1)
-        w_y = torch.exp(-abs_fun(self.args.edge_constant * img_gy).mean(dim=1)).unsqueeze(1)
-
-        if order == 1:
-            return ((w_x*robust_l1(flow_gx)).mean() + (w_y*robust_l1(flow_gy)).mean()) / 2
-        else:
-            flow_gxx, _ = image_grads(flow_gx)
-            _, flow_gyy = image_grads(flow_gy)
-            return ((w_x*robust_l1(flow_gxx)).mean() + (w_y*robust_l1(flow_gyy)).mean()) / 2

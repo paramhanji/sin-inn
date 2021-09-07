@@ -28,11 +28,12 @@ def get_args():
     parser.add_argument('--log-iter', default=200, type=int)
     parser.add_argument('--lr', default=1e-4, type=float)
     parser.add_argument('--logger', default=None, choices=['wandb', None])
-    parser.add_argument('--loss-photo', default=1, type=float)
+    parser.add_argument('--loss-photo', default='l1', choices=['l1'])
     parser.add_argument('--loss-smooth1', default=0.1, type=float)
-    parser.add_argument('--loss-smooth2', default=0.2, type=float)
+    parser.add_argument('--loss-smooth2', default=0, type=float)
     parser.add_argument('--edge-constant', default=150, type=float)
     parser.add_argument('--edge-func', default='gauss', choices=['exp','gauss'])
+    parser.add_argument('--occl', default=None, choices=['brox', None])
     return parser.parse_args()
 
 def train_model(video, logger, ckpt, args):
@@ -43,7 +44,7 @@ def train_model(video, logger, ckpt, args):
         logger.experiment.log({'source': wandb.Video((dataset.video * 255).type(torch.uint8))})
         ckpt = None
 
-    model = T.FlowTrainer(args, loss=F.l1_loss, flow_scale=dataset.flow.max().item())
+    model = T.FlowTrainer(args, flow_scale=dataset.flow.max().item())
     trainer = pl.Trainer(gpus=1, logger=logger, max_epochs=args.epochs,
                          callbacks=clbcks, auto_lr_find=True,
                          resume_from_checkpoint=ckpt,
