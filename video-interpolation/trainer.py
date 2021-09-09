@@ -15,8 +15,8 @@ def net(in_channels, activation, out_channels=3):
         out_channels=out_channels,
         hidden_dim=256,
         # hidden_dim=375,
-        hidden_layers=3,
-        # hidden_layers=5,
+        # hidden_layers=3,
+        hidden_layers=5,
         activation=activation)
 
 
@@ -51,8 +51,8 @@ class FlowTrainer(pl.LightningModule):
     def training_step(self, batch, batch_idx):
         frame1, frame2, times, gt_flow = batch
         flow_fw, flow_bw = self.forward(frame1, times)
-        warped_fw = self.resample(frame2.contiguous(), flow_fw.contiguous())
-        warped_bw = self.resample(frame1.contiguous(), flow_bw.contiguous())
+        warped_fw = self.resample(frame2, flow_fw)
+        warped_bw = self.resample(frame1, flow_bw)
         mask_fw = self.occlusion(flow_fw, flow_bw)
         mask_bw = self.occlusion(flow_bw, flow_fw)
 

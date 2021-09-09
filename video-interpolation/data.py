@@ -85,6 +85,7 @@ class Images(BaseMedia):
                  for i in range(49)]
         trans = T.Compose([lambda x: torch.tensor(x).permute(2,0,1), T.Resize(size)])
         self.flow = torch.stack([trans(f) for f in flows])
+        print('Dataset dimensions: ', self.video.shape)
 
     def readFlow(self, fn):
         '''

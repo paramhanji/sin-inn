@@ -1,6 +1,5 @@
-from torch.nn.modules.module import Module
+import torch
 from torch.autograd import Function, Variable
-import resample2d_cuda
 
 class Resample2dFunction(Function):
 
@@ -37,13 +36,32 @@ class Resample2dFunction(Function):
 
         return grad_input1, grad_input2, None, None
 
-class Resample2d(Module):
+
+class Resample2d_old(torch.nn.Module):
 
     def __init__(self, kernel_size=1, bilinear = True):
-        super(Resample2d, self).__init__()
+        import resample2d_cuda
+        super(Resample2d_old, self).__init__()
         self.kernel_size = kernel_size
         self.bilinear = bilinear
 
     def forward(self, input1, input2):
         input1_c = input1.contiguous()
         return Resample2dFunction.apply(input1_c, input2, self.kernel_size, self.bilinear)
+
+class Resample2d(torch.nn.Module):
+    def __init__(self, mode='bilinear'):
+        super().__init__()
+        self.mode = mode
+
+    def forward(self, img, flow):
+        b, _, h, w = img.shape
+        coords = torch.meshgrid(torch.arange(h), torch.arange(w))
+        coords = torch.stack(coords[::-1], dim=0).float().to(img)
+        coords = coords[None].repeat(b, 1, 1, 1)
+
+        # Apply flow and map to [-1, 1]
+        new_coords = (coords + flow).permute(0, 2, 3, 1)
+        new_coords = new_coords / coords.amax(dim=(0, 2, 3)) * 2 - 1
+        warped = torch.nn.functional.grid_sample(img, new_coords, mode=self.mode)
+        return warped
