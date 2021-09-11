@@ -28,13 +28,13 @@ def get_args():
     parser.add_argument('--log-iter', default=200, type=int)
     parser.add_argument('--lr', default=1e-4, type=float)
     parser.add_argument('--logger', default=None, choices=['wandb', None])
-    parser.add_argument('--loss-photo', default='l1', choices=['l1'])
-    parser.add_argument('--loss-smooth1', default=0.1, type=float)
+    parser.add_argument('--loss-photo', default='l1', choices=['l1', 'census', 'ssim', 'charbonnier'])
+    parser.add_argument('--loss-smooth1', default=0.05, type=float)
     parser.add_argument('--loss-smooth2', default=0, type=float)
     parser.add_argument('--edge-constant', default=150, type=float)
-    parser.add_argument('--edge-func', default='gauss', choices=['exp','gauss'])
+    parser.add_argument('--edge-func', default='gauss', choices=['exp', 'gauss'])
     parser.add_argument('--occl', default='brox', choices=['brox', None])
-    parser.add_argument('--occl-lambda', default=1, type=float)
+    parser.add_argument('--occl-lambda', default=10, type=float)
     return parser.parse_args()
 
 def train_model(video, logger, ckpt, args):

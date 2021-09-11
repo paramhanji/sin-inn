@@ -54,14 +54,19 @@ class Resample2d(torch.nn.Module):
         super().__init__()
         self.mode = mode
 
-    def forward(self, img, flow):
-        b, _, h, w = img.shape
-        coords = torch.meshgrid(torch.arange(h), torch.arange(w))
-        coords = torch.stack(coords[::-1], dim=0).float().to(img)
-        coords = coords[None].repeat(b, 1, 1, 1)
+    def warped_coords(self, flow):
+        batch, _, ht, wd = flow.shape
+        coords = torch.meshgrid(torch.arange(ht), torch.arange(wd))
+        coords = torch.stack(coords[::-1], dim=0).float().to(flow)
+        coords = coords[None].repeat(batch, 1, 1, 1)
 
-        # Apply flow and map to [-1, 1]
         new_coords = (coords + flow).permute(0, 2, 3, 1)
-        new_coords = new_coords / coords.amax(dim=(0, 2, 3)) * 2 - 1
+        return new_coords, coords.amax(dim=(0, 2, 3))
+
+
+    def forward(self, img, flow):
+        # Apply flow and map to [-1, 1]
+        new_coords, limits = self.warped_coords(flow)
+        new_coords = new_coords / limits * 2 - 1
         warped = torch.nn.functional.grid_sample(img, new_coords, mode=self.mode)
         return warped
