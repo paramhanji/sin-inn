@@ -4,10 +4,8 @@ import data as D
 from glob import glob
 import os.path as path
 import ipdb, argparse
-from math import ceil
 
 import torch
-import torch.nn.functional as F
 import pytorch_lightning as pl
 import wandb
 from pytorch_lightning.loggers import WandbLogger
@@ -27,13 +25,13 @@ def get_args():
     parser.add_argument('--epochs', default=5000, type=int)
     parser.add_argument('--log-iter', default=200, type=int)
     parser.add_argument('--lr', default=1e-4, type=float)
-    parser.add_argument('--logger', default=None, choices=['wandb', None])
+    parser.add_argument('--wandb', action='store_true')
     parser.add_argument('--loss-photo', default='l1', choices=['l1', 'census', 'ssim', 'charbonnier'])
-    parser.add_argument('--loss-smooth1', default=0.05, type=float)
+    parser.add_argument('--loss-smooth1', default=0.1, type=float)
     parser.add_argument('--loss-smooth2', default=0, type=float)
     parser.add_argument('--edge-constant', default=150, type=float)
     parser.add_argument('--edge-func', default='gauss', choices=['exp', 'gauss'])
-    parser.add_argument('--occl', default='brox', choices=['brox', None])
+    parser.add_argument('--occl', default=None, choices=['brox', 'wang', None])
     parser.add_argument('--occl-lambda', default=10, type=float)
     return parser.parse_args()
 
@@ -99,7 +97,7 @@ if __name__ == "__main__":
         video_clip = D.VideoModule(args.input_video, 0, args.end, step=args.step, batch=args.batch, size=args.size)
     scene, _ = path.splitext(path.basename(args.input_video))
     logger, latest_ckpt = None, None
-    if args.logger == 'wandb':
+    if args.wandb:
         unique_name = f'{scene}_{args.step}_{args.name}'
         logger = WandbLogger(project='optical_flow', name=unique_name)
         latest_ckpt = max(glob(path.join('checkpoints', unique_name, '*.ckpt')),

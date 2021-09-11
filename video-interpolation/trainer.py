@@ -5,6 +5,7 @@ import wandb
 
 from model import MLP
 import loss as L
+from my_utils.occlusions import occlusion_unity, occlusion_brox, occlusion_wang
 from my_utils.resample2d import Resample2d
 from my_utils.flow_viz import flow2img
 from my_utils.utils import *
@@ -28,9 +29,18 @@ class FlowTrainer(pl.LightningModule):
         self.resample = Resample2d()
         self.flow_scale = flow_scale
         self.lr = self.args.lr
-        self.occlusion = occlusion_brox if args.occl == 'brox' else occlusion_unity
+        if args.occl == 'brox':
+            self.occlusion = occlusion_brox
+        elif args.occl == 'wang':
+            self.occlusion = occlusion_wang
+        else:
+            self.occlusion = occlusion_unity
         if args.loss_photo == 'l1':
-            self.photometric = L.L1Loss(lambda_reg=args.occl_lambda)
+            self.photometric = L.L1Loss()
+        elif args.loss_photo == 'census':
+            self.photometric = L.CensusLoss()
+        elif args.loss_photo == 'ssim':
+            self.photometric = L.SSIMLoss()
         self.smooth1 = L.BaseLoss() if args.loss_smooth1 == 0 else \
                        L.BilateralSmooth(args.edge_func, args.edge_constant, 1, args.loss_smooth1)
         self.smooth2 = L.BaseLoss() if args.loss_smooth2 == 0 else \
