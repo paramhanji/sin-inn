@@ -32,7 +32,7 @@ def get_args():
     parser.add_argument('--edge-constant', default=150, type=float)
     parser.add_argument('--edge-func', default='gauss', choices=['exp', 'gauss'])
     parser.add_argument('--occl', default=None, choices=['brox', 'wang', None])
-    parser.add_argument('--occl-lambda', default=10, type=float)
+    parser.add_argument('--occl-delay', default=2500, type=int)
     return parser.parse_args()
 
 def train_model(video, logger, ckpt, args):
