@@ -5,7 +5,7 @@ import torchvision
 import torchvision.transforms as T
 import pytorch_lightning as pl
 torchvision.set_video_backend('pyav')
-import os.path as path
+import os, os.path as path
 import abc
 
 class BaseMedia(abc.ABC, data.Dataset):
@@ -75,17 +75,18 @@ class VideoModule(pl.LightningDataModule):
 class Images(BaseMedia):
     def __init__(self, root, size=200):
         super().__init__()
-        frames = [path.join(root, f'frame_{i+1:04d}.png') for i in range(50)]
+        num_frames = len(os.listdir(root))
+        frames = [path.join(root, f'frame_{i+1:04d}.png') for i in range(num_frames)]
         trans = T.Compose([lambda x: io.read_image(x) / 255, T.Resize(size)])
         self.video = torch.stack([trans(f) for f in frames])
         self.T = torch.linspace(-1, 1, self.video.size(0))
 
         scene, _ = path.splitext(path.basename(root))
         flows = [self.readFlow(path.join(root, '../../flow', scene, f'frame_{i+1:04d}.flo'))
-                 for i in range(49)]
+                 for i in range(num_frames - 1)]
         trans = T.Compose([lambda x: torch.tensor(x).permute(2,0,1), T.Resize(size)])
         self.flow = torch.stack([trans(f) for f in flows])
-        print('Dataset dimensions: ', self.video.shape)
+        # print('Dataset dimensions: ', self.video.shape)
 
     def readFlow(self, fn):
         '''
@@ -120,3 +121,14 @@ class ImagesModule(pl.LightningDataModule):
         return data.DataLoader(self.dataset, batch_size=self.batch, num_workers=4)
     def test_dataloader(self) -> data.DataLoader:
         return data.DataLoader(self.dataset, batch_size=self.batch, num_workers=4)
+
+
+def get_video(input_video, args):
+    if path.isdir(path.join(input_video)):
+        # print('Loading MPI sintel sequence')
+        video_clip = ImagesModule(input_video, size=args.size, batch=args.batch)
+    else:
+        # print('Extracting frames from video')
+        video_clip = VideoModule(input_video, 0, args.end, step=args.step, batch=args.batch, size=args.size)
+    scene, _ = path.splitext(path.basename(input_video))
+    return video_clip, scene

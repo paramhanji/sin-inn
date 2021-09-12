@@ -166,29 +166,3 @@ class SIREN(nn.Module):
     
     def forward(self, poses: Tensor) -> Tensor:
         return self.layers(poses)
-
-
-class NeRF(nn.Module):
-    def __init__(self, size=(256, 256), out_channels=3, hidden_dim=256, hidden_layers=3):
-        """
-        size: the dimension of the image
-        out_channels: the number of channels for output, should be 1 if grayscale or 3 if rgb
-        hidden_dim: the number of channels for hidden_layers
-        hidden_layers: how many hidden layers in total
-        """
-        nn.Module.__init__(self)
-        self.size = size
-        self.encoder = Encoder(size)
-        in_channels = self.encoder.out_channels
-        self.layers = MLP(
-            in_channels,
-            out_channels,
-            hidden_dim,
-            hidden_layers,
-            activation='relu')
-
-    def forward(self, poses: Tensor) -> Tensor:
-        """
-        poses is a NxD tensor, where N is the number of points, and D is the dimension, which is 2
-        """
-        return self.layers(self.encoder(poses))

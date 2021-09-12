@@ -1,38 +1,36 @@
 import torch
 import pytorch_lightning as pl
 import torchmetrics as metrics
+import imageio as io
 import wandb
 
 from model import MLP
-import loss as L
-from my_utils.occlusions import occlusion_unity, occlusion_brox, occlusion_wang
+import my_utils.loss as L
+import my_utils.occlusions as O
 from my_utils.resample2d import Resample2d
 from my_utils.flow_viz import flow2img
 from my_utils.utils import *
 
-def net(in_channels, activation, out_channels=3):
-    return MLP(
-        in_channels,
-        out_channels=out_channels,
-        hidden_dim=256,
-        hidden_layers=5,
-        activation=activation)
-
+default_net = MLP(in_channels=3,
+                  out_channels=4,
+                  hidden_dim=256,
+                  hidden_layers=5,
+                  activation='siren')
 
 class FlowTrainer(pl.LightningModule):
-    def __init__(self, args, flow_scale=None):
+    def __init__(self, args, flow_scale, net=default_net, test_epoch=None):
         super().__init__()
         self.args = args
-        self.net = net(3, 'siren', out_channels=4)
+        self.net = net
         self.resample = Resample2d()
         self.flow_scale = flow_scale
         self.lr = self.args.lr
         if args.occl == 'brox':
-            self.occlusion = occlusion_brox
+            self.occlusion = O.occlusion_brox
         elif args.occl == 'wang':
-            self.occlusion = occlusion_wang
+            self.occlusion = O.occlusion_wang
         else:
-            self.occlusion = occlusion_unity
+            self.occlusion = O.occlusion_unity
         if args.loss_photo == 'l1':
             self.photometric = L.L1Loss()
         elif args.loss_photo == 'census':
@@ -45,6 +43,7 @@ class FlowTrainer(pl.LightningModule):
                        L.BilateralSmooth(args.edge_func, args.edge_constant, 2, args.loss_smooth2)
 
         self.psnr = metrics.PSNR()
+        self.test_epoch = test_epoch
 
     def forward(self, F, T):
         _, _, h, w = F.shape
@@ -62,8 +61,8 @@ class FlowTrainer(pl.LightningModule):
         warped_fw = self.resample(frame2, flow_fw)
         warped_bw = self.resample(frame1, flow_bw)
         if self.current_epoch > self.args.occl_delay:
-            mask_fw = self.occlusion(flow_fw, flow_bw)
-            mask_bw = self.occlusion(flow_bw, flow_fw)
+            mask_fw = self.occlusion(flow_fw, flow_bw, self.args.occl_thresh)
+            mask_bw = self.occlusion(flow_bw, flow_fw, self.args.occl_thresh)
         else:
             mask_fw, mask_bw = torch.ones(2)
 
@@ -83,11 +82,12 @@ class FlowTrainer(pl.LightningModule):
     def validation_step(self, batch, batch_idx):
         frame1, _, times, gt_flow = batch
         flow_fw, flow_bw = self.forward(frame1, times)
-        mask = (self.occlusion(flow_fw, flow_bw).type(torch.uint8) * 255).cpu()
+        mask = (self.occlusion(flow_fw, flow_bw, self.args.occl_thresh).type(torch.uint8) * 255).cpu()
         flow_cat = torch.cat((flow_fw, gt_flow), dim=-1).permute(0,2,3,1)
         flow_cat = flow_cat.cpu().numpy().clip(-10, 10)
         flow_img = torch.stack([torch.tensor(flow2img(f)) for f in flow_cat]).permute(0,3,1,2)
-        return dict(flow=flow_img, mask=mask)
+        epe = torch.sum((flow_fw - gt_flow)**2, dim=1).sqrt().mean().detach()
+        return {'flow':flow_img, 'mask':mask, 'epe':epe}
 
     def validation_epoch_end(self, outputs):
         flows = torch.cat([seq['flow'] for seq in outputs], dim=0).unsqueeze(0)
@@ -97,6 +97,19 @@ class FlowTrainer(pl.LightningModule):
                                         'epoch': self.current_epoch})
             self.logger.experiment.log({'occlusion_mask': wandb.Video(masks),
                                         'epoch': self.current_epoch})
+
+    def test_step(self, *args):
+        return self.validation_step(*args)
+
+    def test_epoch_end(self, outputs):
+        epe = torch.stack([seq['epe'] for seq in outputs]).mean().item()
+        flows = torch.cat([seq['flow'] for seq in outputs], dim=0).permute(0,2,3,1)
+        flow_gif_file = f'results/flow_{self.test_epoch}_epe_{epe}.gif'
+        io.mimsave(flow_gif_file, flows, format='GIF', fps=4)
+        masks = torch.cat([seq['mask'] for seq in outputs], dim=0).permute(0,2,3,1)
+        mask_gif_file = f'results/occl_{self.test_epoch}.gif'
+        io.mimsave(mask_gif_file, masks, format='GIF', fps=4)
+
 
     def configure_optimizers(self):
         return torch.optim.Adam(self.net.parameters(), lr=self.lr)

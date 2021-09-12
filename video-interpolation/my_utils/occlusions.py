@@ -95,22 +95,15 @@ def flow_warp(x, flow12, pad='border', mode='bilinear'):
     return im1_recons
 
 
-def get_occu_mask_bidirection(flow12, flow21, scale=0.01, bias=0.5):
-    flow21_warped = flow_warp(flow21, flow12, pad='zeros')
-    flow12_diff = flow12 + flow21_warped
-    mag = (flow12 * flow12).sum(1, keepdim=True) + \
-          (flow21_warped * flow21_warped).sum(1, keepdim=True)
-    occ_thresh = scale * mag + bias
-    occ = (flow12_diff * flow12_diff).sum(1, keepdim=True) > occ_thresh
-    return occ.float()
-
-
-def occlusion_wang(flow12, flow21, th=0.2):
+def occlusion_wang(flow12, flow21, thresh):
     B, _, H, W = flow21.size()
     base_grid = mesh_grid(B, H, W).type_as(flow21)  # B2HW
 
     corr_map = get_corresponding_map(base_grid + flow21)  # BHW
-    occu_mask = corr_map.clamp(min=0., max=1.) < th
+    if thresh is None:
+        occu_mask = corr_map.clamp(0, 1)
+    else:
+        occu_mask = corr_map < thresh
     return 1 - occu_mask.float()
 
 
@@ -119,7 +112,7 @@ def occlusion_unity(flow, *args):
     return torch.ones_like(flow[:,0], dtype=torch.bool).unsqueeze(1)
 
 
-def occlusion_brox(orig_fw, orig_bw):
+def occlusion_brox(orig_fw, orig_bw, thresh):
     """Forward-backward consistency"""
     resample = Resample2d()
     warped_bw = resample(orig_bw, orig_fw)
