@@ -18,7 +18,7 @@ default_net = MLP(in_channels=3,
                   activation='siren')
 
 class FlowTrainer(pl.LightningModule):
-    def __init__(self, args, flow_scale, net=default_net, test_epoch=None):
+    def __init__(self, args, flow_scale, net=default_net, test_tag=None):
         super().__init__()
         self.args = args
         self.net = net
@@ -43,7 +43,7 @@ class FlowTrainer(pl.LightningModule):
                        L.BilateralSmooth(args.edge_func, args.edge_constant, 2, args.loss_smooth2)
 
         self.psnr = metrics.PSNR()
-        self.test_epoch = test_epoch
+        self.test_tag = test_tag
 
     def forward(self, F, T):
         _, _, h, w = F.shape
@@ -104,10 +104,10 @@ class FlowTrainer(pl.LightningModule):
     def test_epoch_end(self, outputs):
         epe = torch.stack([seq['epe'] for seq in outputs]).mean().item()
         flows = torch.cat([seq['flow'] for seq in outputs], dim=0).permute(0,2,3,1)
-        flow_gif_file = f'results/flow_{self.test_epoch}_epe_{epe}.gif'
+        flow_gif_file = f'results/flow_{self.test_tag}_epe_{epe:.3f}.gif'
         io.mimsave(flow_gif_file, flows, format='GIF', fps=4)
         masks = torch.cat([seq['mask'] for seq in outputs], dim=0).permute(0,2,3,1)
-        mask_gif_file = f'results/occl_{self.test_epoch}.gif'
+        mask_gif_file = f'results/occl_{self.test_tag}.gif'
         io.mimsave(mask_gif_file, masks, format='GIF', fps=4)
 
 

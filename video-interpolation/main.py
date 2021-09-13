@@ -12,7 +12,7 @@ import trainer as T
 
 def get_args():
     parser = argparse.ArgumentParser()
-    parser.add_argument('operation', choices=['metatrain', 'train', 'plot'])
+    parser.add_argument('operation', choices=['metatrain', 'train', 'plot', 'test'])
     # Data options
     parser.add_argument('--input-video', default='../datasets/sintel/training/final/alley_1')
     parser.add_argument('--name', default='temp')
@@ -67,7 +67,7 @@ def train_metamodel(args):
         if (epoch + 1) % args.log_iter == 0:
             video, _ = get_video(args.input_video, args)
             net = copy.deepcopy(meta_net)
-            model = T.FlowTrainer(args, video.dataset.video[0].shape[-1]/10, net=net, test_epoch=epoch)
+            model = T.FlowTrainer(args, video.dataset.video[0].shape[-1]/10, net=net, test_tag=f'meta_{epoch}')
             model.lr = args.lr / 5
             trainer = pl.Trainer(gpus=1, logger=None, max_epochs=args.epochs*10, checkpoint_callback=False,
                                  check_val_every_n_epoch=args.epochs*10 + 1, num_sanity_val_steps=0,
@@ -119,8 +119,9 @@ def plot_fit(args):
                       key=path.getmtime, default=None)
     figure = plt.gcf()
     figure.set_size_inches(16, 12)
-    dataset = video.testset
-    model = T.FlowTrainer.load_from_checkpoint(latest_ckpt, video.dataset.video[0].shape[-1]/10)
+    dataset = video.dataset
+    model = T.FlowTrainer.load_from_checkpoint(latest_ckpt, args=args, flow_scale=dataset.flow.max())
+    # model = T.FlowTrainer.load_from_checkpoint(latest_ckpt, video.dataset.video[0].shape[-1]/10)
     model.eval()
     with torch.no_grad():
         t, _, h, w = dataset.video.shape
@@ -139,10 +140,19 @@ def plot_fit(args):
         f[f == 0] = float('nan')
         plt.scatter(torch.linspace(-1, 1, t)[:-1], f, color='r', marker='.')
         plt.legend()
-        plt.show()
-        # plt.savefig('fits.pdf')
-    # trainer = pl.Trainer(gpus=1, logger=None)
-    # trainer.test(model, dataloaders=video.test_dataloader())
+        plt.savefig(f'results/fit_{unique_name}.pdf')
+
+
+def test_model(args):
+    video, scene = get_video(args.input_video, args)
+    unique_name = f'{scene}_{args.step}_{args.name}'
+    latest_ckpt = max(glob(path.join('checkpoints', unique_name, '*.ckpt')),
+                      key=path.getmtime, default=None)
+    dataset = video.dataset
+    model = T.FlowTrainer.load_from_checkpoint(latest_ckpt, args=args, flow_scale=dataset.flow.max(), test_tag=unique_name)
+    # model = T.FlowTrainer.load_from_checkpoint(latest_ckpt, video.dataset.video[0].shape[-1])
+    trainer = pl.Trainer(gpus=1, logger=None)
+    trainer.test(model, video)
 
 
 if __name__ == "__main__":
@@ -156,3 +166,5 @@ if __name__ == "__main__":
         train_model(args)
     elif args.operation == 'plot':
         plot_fit(args)
+    elif args.operation == 'test':
+        test_model(args)

@@ -144,7 +144,7 @@ experiments/
 # VS code
 .vscode/
 
-logs/
+results/
 
 wandb/
 
