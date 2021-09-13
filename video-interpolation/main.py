@@ -53,7 +53,7 @@ def train_metamodel(args):
             inner_net = copy.deepcopy(meta_net)
             
             # Run inner loop using a pl trainer
-            model = T.FlowTrainer(args, video.dataset.video[0].shape[-1], net=inner_net)
+            model = T.FlowTrainer(args, video.dataset.video[0].shape[-1]/10, net=inner_net)
             trainer = pl.Trainer(gpus=1, logger=None, max_epochs=args.epochs, checkpoint_callback=False,
                                  check_val_every_n_epoch=args.epochs + 1, num_sanity_val_steps=0,
                                  weights_summary=None, progress_bar_refresh_rate=0)
@@ -64,10 +64,11 @@ def train_metamodel(args):
             meta_optim.step()
         
         # Validation
-        if epoch + 1 % args.log_iter == 0:
+        if (epoch + 1) % args.log_iter == 0:
             video, _ = get_video(args.input_video, args)
             net = copy.deepcopy(meta_net)
-            model = T.FlowTrainer(args, video.dataset.video[0].shape[-1], net=net, test_epoch=epoch)
+            model = T.FlowTrainer(args, video.dataset.video[0].shape[-1]/10, net=net, test_epoch=epoch)
+            model.lr = args.lr / 5
             trainer = pl.Trainer(gpus=1, logger=None, max_epochs=args.epochs*10, checkpoint_callback=False,
                                  check_val_every_n_epoch=args.epochs*10 + 1, num_sanity_val_steps=0,
                                  weights_summary=None, progress_bar_refresh_rate=0)
@@ -95,7 +96,7 @@ def train_model(args):
         logger.experiment.log({'source': wandb.Video((dataset.video * 255).type(torch.uint8))})
         latest_ckpt = None
 
-    model = T.FlowTrainer(args, dataset.video[0].shape[-1])
+    model = T.FlowTrainer(args, dataset.video[0].shape[-1]/10)
     trainer = pl.Trainer(gpus=1, logger=logger, max_epochs=args.epochs,
                          callbacks=clbcks, auto_lr_find=True,
                          resume_from_checkpoint=latest_ckpt,
@@ -119,7 +120,7 @@ def plot_fit(args):
     figure = plt.gcf()
     figure.set_size_inches(16, 12)
     dataset = video.testset
-    model = T.FlowTrainer.load_from_checkpoint(latest_ckpt, flow_scale=dataset.flow.max().item())
+    model = T.FlowTrainer.load_from_checkpoint(latest_ckpt, video.dataset.video[0].shape[-1]/10)
     model.eval()
     with torch.no_grad():
         t, _, h, w = dataset.video.shape
