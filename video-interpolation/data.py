@@ -1,10 +1,8 @@
 import numpy as np, torch
 import torch.utils.data as data
-import torchvision.io as io
-import torchvision
+import PIL, imageio
 import torchvision.transforms as T
 import pytorch_lightning as pl
-torchvision.set_video_backend('pyav')
 import os, os.path as path
 import abc
 
@@ -24,10 +22,9 @@ class VideoClip(BaseMedia):
         super().__init__()
         self.step = step
         self.read_video(path, start, start+duration, step, size)
-        self.video, _, infos = io.read_video(path, start_pts=start, end_pts=start+duration,
-                                             pts_unit='sec')
-        self.video = self.video[::step].permute(0,3,1,2) / 255
-        self.video = T.Resize(size)(self.video)
+        trans = T.compose([T.ToTensor(), T.Resize(size)])
+        frames = imageio.mimread(path, memtest=False)[start:start+duration:step]
+        self.video = trans(frames)
         self.T = torch.linspace(-1, 1, self.video.size(0))
         self.run_raft()
 
@@ -63,6 +60,7 @@ class VideoClip(BaseMedia):
         self.flow = torch.stack(self.flow)
         sys.path.pop()
         self.gt_available = True
+        self.flow_scale = 1
 
 class VideoModule(pl.LightningDataModule):
     def __init__(self, file: str, start, duration, size=200, step=10, batch=8):
@@ -82,9 +80,9 @@ class Images(BaseMedia):
         super().__init__()
         num_frames = len(os.listdir(root))
         frames = [path.join(root, f'frame_{i+1:04d}.png') for i in range(num_frames)]
-        _, h, w = io.read_image(frames[0]).shape
+        w, h = PIL.Image.open(frames[0]).size
         assert h <= w, 'Frame should be landscape oriented'
-        trans = T.Compose([lambda x: io.read_image(x) / 255, T.Resize(size)])
+        trans = T.Compose([lambda x: PIL.Image.open(x), T.ToTensor(), T.Resize(size)])
         self.video = torch.stack([trans(f) for f in frames])
         self.T = torch.linspace(-1, 1, self.video.size(0))
 
@@ -131,11 +129,11 @@ class ImagesModule(pl.LightningDataModule):
         self.testset = Images(dir, size=436)
         self.batch = batch
     def train_dataloader(self) -> data.DataLoader:
-        return data.DataLoader(self.trainset, batch_size=self.batch, num_workers=4, shuffle=True)
+        return data.DataLoader(self.trainset, batch_size=self.batch, num_workers=3, shuffle=True)
     def val_dataloader(self) -> data.DataLoader:
-        return data.DataLoader(self.testset, batch_size=1, num_workers=4)
+        return data.DataLoader(self.testset, batch_size=1, num_workers=1)
     def test_dataloader(self) -> data.DataLoader:
-        return data.DataLoader(self.testset, batch_size=1, num_workers=4)
+        return data.DataLoader(self.testset, batch_size=1, num_workers=1)
 
 
 def get_video(input_video, args):
