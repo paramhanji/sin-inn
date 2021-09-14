@@ -18,12 +18,11 @@ default_net = MLP(in_channels=3,
                   activation='siren')
 
 class FlowTrainer(pl.LightningModule):
-    def __init__(self, args, flow_scale, net=default_net, test_tag=None):
+    def __init__(self, args, net=default_net, test_tag=None):
         super().__init__()
         self.args = args
         self.net = net
         self.resample = Resample2d()
-        self.flow_scale = flow_scale
         self.lr = self.args.lr
         if args.occl == 'brox':
             self.occlusion = O.occlusion_brox
@@ -45,19 +44,19 @@ class FlowTrainer(pl.LightningModule):
         self.psnr = metrics.PSNR()
         self.test_tag = test_tag
 
-    def forward(self, F, T):
+    def forward(self, F, T, scale):
         _, _, h, w = F.shape
         t = T.size(0)
         H = torch.linspace(-1, 1, h).to(T)
         W = torch.linspace(-1, 1, w).to(T)
         gridT, gridH, gridW = torch.meshgrid(T, H, W)
         poses = torch.stack((gridT, gridH, gridW), dim=-1).view(-1, 3)
-        flows = self.net(poses).view(t, h, w, 4).permute(0, 3, 1, 2) * self.flow_scale
+        flows = self.net(poses).view(t, h, w, 4).permute(0, 3, 1, 2) * scale
         return flows[:,:2], flows[:,2:]
 
     def training_step(self, batch, batch_idx):
-        frame1, frame2, times, gt_flow = batch
-        flow_fw, flow_bw = self.forward(frame1, times)
+        frame1, frame2, times, scale = batch[:4]
+        flow_fw, flow_bw = self.forward(frame1, times, scale[0])
         warped_fw = self.resample(frame2, flow_fw)
         warped_bw = self.resample(frame1, flow_bw)
         if self.current_epoch > self.args.occl_delay:
@@ -74,20 +73,25 @@ class FlowTrainer(pl.LightningModule):
         loss = photo_loss + smooth1_loss + smooth2_loss
         self.log('train/loss', loss.detach(), on_step=True, on_epoch=False)
 
-        epe = torch.sum((flow_fw - gt_flow)**2, dim=1).sqrt().mean().detach()
         psnr = self.psnr(warped_fw, frame1).detach()
-        self.log('metric', {'EPE': epe, 'PSNR': psnr}, on_step=False, on_epoch=True)
+        self.log('PSNR', psnr, on_step=False, on_epoch=True)
+        if len(batch) == 5:
+            gt_flow = batch[-1]
+            epe = torch.sum((flow_fw - gt_flow)**2, dim=1).sqrt().mean().detach()
+            self.log('EPE', epe, on_step=False, on_epoch=True)
         return loss
 
     def validation_step(self, batch, batch_idx):
-        frame1, _, times, gt_flow = batch
-        flow_fw, flow_bw = self.forward(frame1, times)
+        frame1, _, times, scale = batch[:4]
+        flow_fw, flow_bw = self.forward(frame1, times, scale[0])
         mask = (self.occlusion(flow_fw, flow_bw, self.args.occl_thresh).type(torch.uint8) * 255).cpu()
-        flow_cat = torch.cat((flow_fw, gt_flow), dim=-1).permute(0,2,3,1)
-        flow_cat = flow_cat.cpu().numpy().clip(-10, 10)
-        flow_img = torch.stack([torch.tensor(flow2img(f)) for f in flow_cat]).permute(0,3,1,2)
-        epe = torch.sum((flow_fw - gt_flow)**2, dim=1).sqrt().mean().detach()
-        return {'flow':flow_img, 'mask':mask, 'epe':epe}
+        flow_img = torch.stack([flow2img(f) for f in flow_fw])
+        out = {'flow':flow_img, 'mask':mask}
+        if len(batch) == 5:
+            gt_flow = batch[-1]
+            epe = torch.sum((flow_fw - gt_flow)**2, dim=1).sqrt().mean().detach()
+            out['epe'] = epe
+        return out
 
     def validation_epoch_end(self, outputs):
         flows = torch.cat([seq['flow'] for seq in outputs], dim=0).unsqueeze(0)
@@ -102,7 +106,8 @@ class FlowTrainer(pl.LightningModule):
         return self.validation_step(*args)
 
     def test_epoch_end(self, outputs):
-        epe = torch.stack([seq['epe'] for seq in outputs]).mean().item()
+        epe = torch.stack([seq['epe'] for seq in outputs]).mean().item() \
+              if 'epe' in outputs[0] else 0
         flows = torch.cat([seq['flow'] for seq in outputs], dim=0).permute(0,2,3,1)
         flow_gif_file = f'results/flow_{self.test_tag}_epe_{epe:.3f}.gif'
         io.mimsave(flow_gif_file, flows, format='GIF', fps=4)

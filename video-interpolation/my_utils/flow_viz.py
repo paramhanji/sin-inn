@@ -1,14 +1,15 @@
 # Reference: https://github.com/NVIDIA/flownet2-pytorch/
 # blob/2e9e010c98931bc7cef3eb063b195f1e0ab470ba/utils/flow_utils.py#L72
 
-import numpy as np
+import numpy as np, torch
 
-def flow2img(flow_data):
+def flow2img(flow_data, clip=10):
 	"""
 	convert optical flow into color image
 	:param flow_data:
 	:return: color image
 	"""
+	flow_data = flow_data.permute(1,2,0).cpu().numpy().clip(-clip, clip)
 	u = flow_data[:, :, 0]
 	v = flow_data[:, :, 1]
 
@@ -28,7 +29,7 @@ def flow2img(flow_data):
 	idx = np.repeat(idx_unknown[:, :, np.newaxis], 3, axis=2)
 	img[idx] = 0
 
-	return np.uint8(img)
+	return torch.tensor(np.uint8(img)).permute(2,0,1)
 
 
 def compute_color(u, v):

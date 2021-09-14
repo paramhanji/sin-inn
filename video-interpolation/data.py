@@ -13,7 +13,11 @@ class BaseMedia(abc.ABC, data.Dataset):
         return self.video.size(0) - 1
 
     def __getitem__(self, index):
-        return self.video[index], self.video[index+1], self.T[index], self.flow[index]
+        if self.gt_available:
+            return self.video[index], self.video[index+1], self.T[index], self.flow_scale, self.flow[index]
+        else:
+            return self.video[index], self.video[index+1], self.T[index], self.flow_scale
+
 
 class VideoClip(BaseMedia):
     def __init__(self, path, start, duration, size=200, step=10):
@@ -58,6 +62,7 @@ class VideoClip(BaseMedia):
 
         self.flow = torch.stack(self.flow)
         sys.path.pop()
+        self.gt_available = True
 
 class VideoModule(pl.LightningDataModule):
     def __init__(self, file: str, start, duration, size=200, step=10, batch=8):
@@ -77,15 +82,24 @@ class Images(BaseMedia):
         super().__init__()
         num_frames = len(os.listdir(root))
         frames = [path.join(root, f'frame_{i+1:04d}.png') for i in range(num_frames)]
+        _, h, w = io.read_image(frames[0]).shape
+        assert h <= w, 'Frame should be landscape oriented'
         trans = T.Compose([lambda x: io.read_image(x) / 255, T.Resize(size)])
         self.video = torch.stack([trans(f) for f in frames])
         self.T = torch.linspace(-1, 1, self.video.size(0))
 
         scene, _ = path.splitext(path.basename(root))
-        flows = [self.readFlow(path.join(root, '../../flow', scene, f'frame_{i+1:04d}.flo'))
-                 for i in range(num_frames - 1)]
-        trans = T.Compose([lambda x: torch.tensor(x).permute(2,0,1), T.Resize(size)])
-        self.flow = torch.stack([trans(f) for f in flows])
+        flow_dir = path.join(root, '../../flow')
+        if path.isdir(flow_dir):
+            self.gt_available = True
+            rescale_ratio = size / h
+            flows = [self.readFlow(path.join(flow_dir, scene, f'frame_{i+1:04d}.flo'))
+                     for i in range(num_frames - 1)]
+            trans = T.Compose([lambda x: torch.tensor(x).permute(2,0,1), T.Resize(size)])
+            self.flow = torch.stack([trans(f) for f in flows]) * rescale_ratio
+        else:
+            self.gt_available = False
+        self.flow_scale = self.video.shape[-1] / 5
         # print('Dataset dimensions: ', self.video.shape)
 
     def readFlow(self, fn):
@@ -113,14 +127,15 @@ class Images(BaseMedia):
 class ImagesModule(pl.LightningDataModule):
     def __init__(self, dir, size=200, batch=8):
         super().__init__()
-        self.dataset = Images(dir, size=size)
+        self.trainset = Images(dir, size=size)
+        self.testset = Images(dir, size=436)
         self.batch = batch
     def train_dataloader(self) -> data.DataLoader:
-        return data.DataLoader(self.dataset, batch_size=self.batch, num_workers=4, shuffle=True)
+        return data.DataLoader(self.trainset, batch_size=self.batch, num_workers=4, shuffle=True)
     def val_dataloader(self) -> data.DataLoader:
-        return data.DataLoader(self.dataset, batch_size=self.batch, num_workers=4)
+        return data.DataLoader(self.testset, batch_size=1, num_workers=4)
     def test_dataloader(self) -> data.DataLoader:
-        return data.DataLoader(self.dataset, batch_size=self.batch, num_workers=4)
+        return data.DataLoader(self.testset, batch_size=1, num_workers=4)
 
 
 def get_video(input_video, args):
