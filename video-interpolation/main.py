@@ -15,16 +15,19 @@ def get_args():
     parser = argparse.ArgumentParser()
     parser.add_argument('operation', choices=['metatrain', 'train', 'plot', 'test'])
     # Data options
-    parser.add_argument('--input-video', default='../datasets/sintel/training/final/ambush_5')
+    parser.add_argument('--input-video', default='../datasets/sintel/training/final/market_5')
     parser.add_argument('--name', default='temp')
     parser.add_argument('--end', type=int)
     parser.add_argument('--step', type=int)
     parser.add_argument('--size', default=200, type=int)
     parser.add_argument('--batch', default=8, type=int)
+    parser.add_argument('--test-size', default=200, type=int)
+    parser.add_argument('--test-batch', default=8, type=int)
+    parser.add_argument('--downsample', type=int)
     # Train options
     parser.add_argument('--epochs', default=10000, type=int)
     parser.add_argument('--meta-epochs', type=int)
-    parser.add_argument('--log-iter', default=1000, type=int)
+    parser.add_argument('--val-iter', default=100, type=int)
     parser.add_argument('--lr', default=2e-5, type=float)
     parser.add_argument('--meta-lr', type=float)
     parser.add_argument('--wandb', action='store_true')
@@ -65,7 +68,7 @@ def train_metamodel(args):
             meta_optim.step()
         
         # Validation
-        if (epoch + 1) % args.log_iter == 0:
+        if (epoch + 1) % args.val_iter == 0:
             video, _ = get_video(args.input_video, args)
             net = copy.deepcopy(meta_net)
             model = T.FlowTrainer(args, net=net, test_tag=f'meta_{epoch}')
@@ -84,6 +87,9 @@ def train_metamodel(args):
 
 def train_model(args):
     video, scene = get_video(args.input_video, args)
+    dataset = video.testset
+    if not dataset.gt_available:
+        args.val_iter = args.epochs + 1
     logger, latest_ckpt = None, None
     if args.wandb:
         logger = WandbLogger(project='optical_flow', name=f'{scene}_{args.name}')
@@ -91,11 +97,15 @@ def train_model(args):
         latest_ckpt = max(glob(path.join('checkpoints', scene, args.name, '*.ckpt')),
                           default=path.join('checkpoints', scene, args.name, 'temp'),
                           key=path.getmtime)
-        clbks = [ModelCheckpoint(monitor='EPE', every_n_epochs=args.epochs//100,
-                                 dirpath=path.dirname(latest_ckpt))]
+        if dataset.gt_available:
+            clbks = [ModelCheckpoint(monitor='val/EPE', every_n_epochs=args.epochs//100,
+                                     dirpath=path.dirname(latest_ckpt))]
+        else:
+            clbks = [ModelCheckpoint(every_n_epochs=args.epochs//100,
+                                     dirpath=path.dirname(latest_ckpt))]
+
     else:
         clbks = []
-    dataset = video.testset
     if latest_ckpt and not path.isfile(latest_ckpt):
         logger.experiment.log({'source': wandb.Video((dataset.video * 255).type(torch.uint8))})
         if dataset.gt_available:
@@ -108,10 +118,10 @@ def train_model(args):
                          checkpoint_callback=logger is not None,
                          callbacks=clbks,
                          resume_from_checkpoint=latest_ckpt,
-                         check_val_every_n_epoch=args.log_iter,
+                         check_val_every_n_epoch=args.val_iter,
                          num_sanity_val_steps=0, weights_summary=None)
-    with ipdb.launch_ipdb_on_exception():
-        trainer.fit(model, video)
+    trainer.fit(model, video)
+    trainer.test(model, video)
 
 
 def plot_fit(args):
@@ -151,7 +161,6 @@ def test_model(args):
     latest_ckpt = max(glob(path.join('checkpoints', scene, args.name, '*.ckpt')),
                         default=path.join('checkpoints', scene, args.name, 'temp'),
                         key=path.getmtime)
-    dataset = video.testset
     model = T.FlowTrainer.load_from_checkpoint(latest_ckpt, args=args, test_tag=unique_name)
     trainer = pl.Trainer(gpus=1, logger=None)
     trainer.test(model, video)

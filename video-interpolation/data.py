@@ -18,7 +18,7 @@ class BaseMedia(abc.ABC, data.Dataset):
 
 
 class VideoClip(BaseMedia):
-    def __init__(self, path, start, duration, size=200, step=10):
+    def __init__(self, path, start, duration, step=10, size=200):
         super().__init__()
         self.step = step
         self.read_video(path, start, start+duration, step, size)
@@ -61,18 +61,6 @@ class VideoClip(BaseMedia):
         sys.path.pop()
         self.gt_available = True
         self.flow_scale = 1
-
-class VideoModule(pl.LightningDataModule):
-    def __init__(self, file: str, start, duration, size=200, step=10, batch=8):
-        super().__init__()
-        self.dataset = VideoClip(file, start, duration, size=size, step=step)
-        self.batch = batch
-    def train_dataloader(self) -> data.DataLoader:
-        return data.DataLoader(self.dataset, batch_size=self.batch, shuffle=True, num_workers=4)
-    def val_dataloader(self) -> data.DataLoader:
-        return data.DataLoader(self.dataset, batch_size=self.batch, num_workers=4)
-    def test_dataloader(self) -> data.DataLoader:
-        return data.DataLoader(self.dataset, batch_size=self.batch, num_workers=4)
 
 
 class Images(BaseMedia):
@@ -122,26 +110,32 @@ class Images(BaseMedia):
                 # The reshape here is for visualization, the original code is (w,h,2)
                 return np.resize(data, (int(h), int(w), 2))
 
-class ImagesModule(pl.LightningDataModule):
-    def __init__(self, dir, size=200, batch=8):
+
+class LightningLoader(pl.LightningDataModule):
+    def __init__(self, trainset, testset, train_batch, test_batch):
         super().__init__()
-        self.trainset = Images(dir, size=size)
-        self.testset = Images(dir, size=436)
-        self.batch = batch
+        self.trainset = trainset
+        self.testset = testset
+        self.train_batch = train_batch
+        self.test_batch = test_batch
     def train_dataloader(self) -> data.DataLoader:
-        return data.DataLoader(self.trainset, batch_size=self.batch, num_workers=3, shuffle=True)
+        return data.DataLoader(self.trainset, batch_size=self.train_batch, num_workers=3, shuffle=True)
     def val_dataloader(self) -> data.DataLoader:
-        return data.DataLoader(self.testset, batch_size=1, num_workers=1)
+        return data.DataLoader(self.testset, batch_size=self.test_batch, num_workers=3)
     def test_dataloader(self) -> data.DataLoader:
-        return data.DataLoader(self.testset, batch_size=1, num_workers=1)
+        return data.DataLoader(self.testset, batch_size=self.test_batch, num_workers=3)
 
 
 def get_video(input_video, args):
-    if path.isdir(path.join(input_video)):
-        # print('Loading MPI sintel sequence')
-        video_clip = ImagesModule(input_video, size=args.size, batch=args.batch)
+    if path.isdir(input_video):
+        print('Reading images from directory')
+        trainset = Images(input_video, size=args.size)
+        testset = Images(input_video, size=args.test_size)
     else:
-        # print('Extracting frames from video')
-        video_clip = VideoModule(input_video, 0, args.end, step=args.step, batch=args.batch, size=args.size)
+        print('Extracting frames from video')
+        trainset = VideoClip(input_video, 0, args.end, args.step, size=args.size)
+        testset = VideoClip(input_video, 0, args.end, args.step, size=args.test_size)
+
+    video_clip = LightningLoader(trainset, testset, args.batch, args.test_batch)
     scene, _ = path.splitext(path.basename(input_video))
     return video_clip, scene
