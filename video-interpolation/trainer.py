@@ -91,6 +91,7 @@ class FlowTrainer(pl.LightningModule):
             gt_flow = batch[-1]
             epe = torch.sum((flow_fw - gt_flow)**2, dim=1).sqrt().mean().detach()
             out['epe'] = epe
+            self.log('val_epe', epe, on_step=False, on_epoch=True)
         return out
 
     def validation_epoch_end(self, outputs):
