@@ -22,7 +22,7 @@ class VideoClip(BaseMedia):
         super().__init__()
         self.step = step
         self.read_video(path, start, start+duration, step, size)
-        trans = T.compose([T.ToTensor(), T.Resize(size)])
+        trans = T.compose([T.ToTensor(), T.Resize(size, antialias=True)])
         frames = imageio.mimread(path, memtest=False)[start:start+duration:step]
         self.video = trans(frames)
         self.T = torch.linspace(-1, 1, self.video.size(0))
@@ -70,7 +70,7 @@ class Images(BaseMedia):
         frames = [path.join(root, f'frame_{i+1:04d}.png') for i in range(num_frames)]
         w, h = PIL.Image.open(frames[0]).size
         assert h <= w, 'Frame should be landscape oriented'
-        trans = T.Compose([lambda x: PIL.Image.open(x), T.ToTensor(), T.Resize(size)])
+        trans = T.Compose([lambda x: PIL.Image.open(x), T.ToTensor(), T.Resize(size, antialias=True)])
         self.video = torch.stack([trans(f) for f in frames])
         self.T = torch.linspace(-1, 1, self.video.size(0))
 
@@ -81,7 +81,7 @@ class Images(BaseMedia):
             rescale_ratio = size / h
             flows = [self.readFlow(path.join(flow_dir, scene, f'frame_{i+1:04d}.flo'))
                      for i in range(num_frames - 1)]
-            trans = T.Compose([lambda x: torch.tensor(x).permute(2,0,1), T.Resize(size)])
+            trans = T.Compose([lambda x: torch.tensor(x).permute(2,0,1), T.Resize(size, antialias=True)])
             self.flow = torch.stack([trans(f) for f in flows]) * rescale_ratio
         else:
             self.gt_available = False
@@ -136,6 +136,7 @@ def get_video(input_video, args):
         trainset = VideoClip(input_video, 0, args.end, args.step, size=args.size)
         testset = VideoClip(input_video, 0, args.end, args.step, size=args.test_size)
 
+    print(f'Max flow: {trainset.flow.max().item()}, estimated scale: {trainset.flow_scale}')
     video_clip = LightningLoader(trainset, testset, args.batch, args.test_batch)
     scene, _ = path.splitext(path.basename(input_video))
     return video_clip, scene

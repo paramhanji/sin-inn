@@ -1,6 +1,6 @@
 from glob import glob
 import os, os.path as path
-import ipdb, argparse, copy, logging, warnings
+import argparse, copy, logging, warnings
 from tqdm import trange, tqdm
 
 import torch, numpy as np, wandb, pytorch_lightning as pl
@@ -9,6 +9,7 @@ from pytorch_lightning.callbacks import ModelCheckpoint
 
 from data import get_video
 import trainer as T
+import model as M
 from my_utils.flow_viz import flow2img
 
 def get_args():
@@ -24,11 +25,14 @@ def get_args():
     parser.add_argument('--test-size', default=200, type=int)
     parser.add_argument('--test-batch', default=8, type=int)
     parser.add_argument('--downsample', type=int)
+    parser.add_argument('--downsample-type', choices=['nearest', 'bilinear', 'bicubic', 'blurpool'])
+    # Network options
+    parser.add_argument('--net', default='siren', choices=['siren', 'ffn'])
     # Train options
-    parser.add_argument('--epochs', default=10000, type=int)
+    parser.add_argument('--epochs', default=5000, type=int)
     parser.add_argument('--meta-epochs', type=int)
-    parser.add_argument('--val-iter', default=100, type=int)
-    parser.add_argument('--lr', default=2e-5, type=float)
+    parser.add_argument('--val-iter', default=50, type=int)
+    parser.add_argument('--lr', default=5e-5, type=float)
     parser.add_argument('--meta-lr', type=float)
     parser.add_argument('--wandb', action='store_true')
     parser.add_argument('--loss-photo', default='l1', choices=['l1', 'census', 'ssim', 'charbonnier'])
@@ -91,6 +95,7 @@ def train_model(args):
     if not dataset.gt_available:
         args.val_iter = args.epochs + 1
     logger, latest_ckpt = None, None
+
     if args.wandb:
         logger = WandbLogger(project='optical_flow', name=f'{scene}_{args.name}')
         logger.log_hyperparams(args)
@@ -119,9 +124,10 @@ def train_model(args):
                          callbacks=clbks,
                          resume_from_checkpoint=latest_ckpt,
                          check_val_every_n_epoch=args.val_iter,
-                         num_sanity_val_steps=0, weights_summary=None)
+                         num_sanity_val_steps=0)
     trainer.fit(model, video)
-    trainer.test(model, video)
+    if model.completed_training:
+        trainer.test(model, video)
 
 
 def plot_fit(args):
@@ -168,6 +174,12 @@ def test_model(args):
 
 if __name__ == "__main__":
     args = get_args()
+
+    params = M.ModelParams()
+    if args.net == 'siren':
+        args.net = M.SirenModel(params)
+    elif args.net == 'ffn':
+        args.net = M.FFModel(params)
 
     if args.operation == 'metatrain':
         with warnings.catch_warnings():
