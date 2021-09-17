@@ -18,13 +18,13 @@ class ModelParams:
     def __init__(self, **kwargs):
         self.domain_dim = 3
         self.num_frequencies = 256
-        self.std = 18
+        self.std = 25
         self.power = 20
         self.num_layers = 3
         self.hidden_dim = 256
         self.output_channels = 4
         self.num_frequencies_pe = 4
-        self.std_rbf = 10
+        self.std_rbf = 12
         self.fill_args(**kwargs)
 
 
@@ -590,6 +590,13 @@ class PRFFModel(ProgressiveModel):
         return GaussianRotatedFourierFeatures(opt.domain_dim, opt.num_frequencies, opt.std)
 
 
+class PUFFModel(ProgressiveModel):
+
+    @staticmethod
+    def get_encoding_layer(opt: ModelParams):
+        return UniformFourierFeatures(opt.domain_dim, opt.num_frequencies, opt.std)
+
+
 class MPFFModel(ProgressiveModel):
 
     @staticmethod
@@ -669,3 +676,9 @@ class UniformPieceWiseEncoding(PieceWiseEncoding):
         frequencies: T = torch.randn(self.domain_dim, self.num_frequencies).abs()
         frequencies = nnf.normalize(frequencies, p=2, dim=0) * magnitude[None, :]
         return frequencies
+
+
+model_dict = {'siren':SirenModel, 'FFN':FFModel, 'UFF':UFFModel, 'PFF':PFFModel,
+              'RBF':RbfModel, 'PRBF':PRBFModel, 'RBFG':RbfgModel, 'PRBFG':PRBFGModel,
+              'PE':PEModel, 'PPE':PPEModel, 'RFF':RFFModel, 'PRFF':PRFFModel,
+              'PUFF':PUFFModel}

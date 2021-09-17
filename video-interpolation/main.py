@@ -10,6 +10,7 @@ from pytorch_lightning.callbacks import ModelCheckpoint
 from data import get_video
 import trainer as T
 import model as M
+import progressive_controller as C
 from my_utils.flow_viz import flow2img
 
 def get_args():
@@ -23,16 +24,17 @@ def get_args():
     parser.add_argument('--size', default=200, type=int)
     parser.add_argument('--batch', default=8, type=int)
     parser.add_argument('--test-size', default=200, type=int)
-    parser.add_argument('--test-batch', default=8, type=int)
+    parser.add_argument('--test-batch', default=1, type=int)
     parser.add_argument('--downsample', type=int)
     parser.add_argument('--downsample-type', choices=['nearest', 'bilinear', 'bicubic', 'blurpool'])
     # Network options
-    parser.add_argument('--net', default='siren', choices=['siren', 'ffn'])
+    parser.add_argument('--net', default='siren')
+    parser.add_argument('--spatially-adaptive', action='store_true')
     # Train options
     parser.add_argument('--epochs', default=5000, type=int)
     parser.add_argument('--meta-epochs', type=int)
     parser.add_argument('--val-iter', default=50, type=int)
-    parser.add_argument('--lr', default=5e-5, type=float)
+    parser.add_argument('--lr', default=1e-4, type=float)
     parser.add_argument('--meta-lr', type=float)
     parser.add_argument('--wandb', action='store_true')
     parser.add_argument('--loss-photo', default='l1', choices=['l1', 'census', 'ssim', 'charbonnier'])
@@ -41,7 +43,7 @@ def get_args():
     parser.add_argument('--edge-constant', default=150, type=float)
     parser.add_argument('--edge-func', default='gauss', choices=['exp', 'gauss'])
     parser.add_argument('--occl', default=None, choices=['brox', 'wang', None])
-    parser.add_argument('--occl-delay', default=2500, type=int)
+    parser.add_argument('--occl-delay', default=1000, type=int)
     parser.add_argument('--occl-thresh', default=0.6, type=float)
     return parser.parse_args()
 
@@ -176,10 +178,13 @@ if __name__ == "__main__":
     args = get_args()
 
     params = M.ModelParams()
-    if args.net == 'siren':
-        args.net = M.SirenModel(params)
-    elif args.net == 'ffn':
-        args.net = M.FFModel(params)
+    args.net = M.model_dict[args.net](params)
+    if args.net.is_progressive:
+        if args.spatially_adaptive:
+            block_iterations = max(int(2 * args.epochs / args.net.encoding_dim), 1)
+            args.net = C.StashedSpatialController(args.net, 50, args.epochs, epsilon=1e-3)
+        else:
+            args.net = C.LinearControllerEarly(args.net, args.epochs, epsilon=1e-3)
 
     if args.operation == 'metatrain':
         with warnings.catch_warnings():
