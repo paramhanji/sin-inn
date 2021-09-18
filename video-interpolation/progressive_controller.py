@@ -238,7 +238,7 @@ class FixedSpatialController(ProgressiveEncoderController):
         mask[indices_const] = base_mask
         return mask
 
-    @functools.lru_cache
+    @functools.lru_cache()
     def get_blur_mask(self, k):
         with torch.no_grad():
             # std = 0.3 * ((k ** 2 - 1) * 0.5 - 1) + 0.8
@@ -488,12 +488,12 @@ class StashedSpatialController(ProgressiveEncoderController):
         self.log_counter[:] = 0
         self.iteration = 0
 
-    @functools.lru_cache
+    @functools.lru_cache()
     def get_blur_log_weight(self, k, device: D) -> T:
         w = torch.ones(1, 1, *([k] * self.mask_dim), device=device)
         return w
 
-    @functools.lru_cache
+    @functools.lru_cache()
     def get_mask_log_weight(self, k, device: D) -> T:
         w = torch.ones(k ** self.mask_dim, device=device)
         w = w / (k ** self.mask_dim - 1)
@@ -699,7 +699,7 @@ class StashedSpatialController(ProgressiveEncoderController):
         self.trigger = False
         self.epsilon_ = epsilon
         self.k = 5 if self.mask.shape[0] > 100 else 3
-        self.stash: TNS = None, None
+        self.stash = None, None
         log_buffer = torch.zeros(self.mask.shape[0], dtype=torch.float)
         log_counter = torch.zeros(self.mask.shape[0], dtype=torch.float)
         self.register_buffer('log_buffer', log_buffer.detach())

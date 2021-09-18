@@ -150,3 +150,6 @@ wandb/
 
 checkpoints/
 
+# HPC files
+machine.file.*
+slurm-*.out

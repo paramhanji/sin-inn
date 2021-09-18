@@ -175,7 +175,7 @@ class PolynomialEncoding(EncodingLayer):
 
     def expand(self, x: T) -> T:
 
-        @functools.lru_cache
+        @functools.lru_cache()
         def expand_(*shape) -> T:
             out = []
             for multipliers in self.kernel:
@@ -541,7 +541,7 @@ class ProgressiveModel(EncodedMlpModel, abc.ABC):
     def encoding_dim(self):
         return self.encode.output_channels + self.domain_dim
 
-    @functools.lru_cache
+    @functools.lru_cache()
     def get_mask(self, alpha: float) -> T:
         mask = torch.zeros(self.encoding_dim)
         if alpha != 0:
@@ -682,3 +682,4 @@ model_dict = {'siren':SirenModel, 'FFN':FFModel, 'UFF':UFFModel, 'PFF':PFFModel,
               'RBF':RbfModel, 'PRBF':PRBFModel, 'RBFG':RbfgModel, 'PRBFG':PRBFGModel,
               'PE':PEModel, 'PPE':PPEModel, 'RFF':RFFModel, 'PRFF':PRFFModel,
               'PUFF':PUFFModel}
+
