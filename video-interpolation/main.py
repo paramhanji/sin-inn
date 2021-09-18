@@ -15,7 +15,8 @@ from my_utils.flow_viz import flow2img
 
 def get_args():
     parser = argparse.ArgumentParser()
-    parser.add_argument('operation', choices=['metatrain', 'train', 'plot', 'test'])
+    parser.add_argument('operation', choices=['metatrain', 'train', 'plot', 'test', 'summarize'])
+    parser.add_argument('--ngpus', default=1, type=int)
     # Data options
     parser.add_argument('--input-video', default='../datasets/sintel/training/final/market_5')
     parser.add_argument('--name', default='temp')
@@ -64,7 +65,7 @@ def train_metamodel(args):
             
             # Run inner loop using a pl trainer
             model = T.FlowTrainer(args, net=inner_net)
-            trainer = pl.Trainer(gpus=1, logger=None, max_epochs=args.epochs, checkpoint_callback=False,
+            trainer = pl.Trainer(gpus=args.ngpus, logger=None, max_epochs=args.epochs, checkpoint_callback=False,
                                  check_val_every_n_epoch=args.epochs + 1, num_sanity_val_steps=0,
                                  weights_summary=None, progress_bar_refresh_rate=0)
             trainer.fit(model, video)
@@ -79,7 +80,7 @@ def train_metamodel(args):
             net = copy.deepcopy(meta_net)
             model = T.FlowTrainer(args, net=net, test_tag=f'meta_{epoch}')
             model.lr = args.lr / 5
-            trainer = pl.Trainer(gpus=1, logger=None, max_epochs=args.epochs*10, checkpoint_callback=False,
+            trainer = pl.Trainer(gpus=args.ngpus, logger=None, max_epochs=args.epochs*10, checkpoint_callback=False,
                                  check_val_every_n_epoch=args.epochs*10 + 1, num_sanity_val_steps=0,
                                  weights_summary=None, progress_bar_refresh_rate=0)
             trainer.fit(model, video)
@@ -121,7 +122,7 @@ def train_model(args):
         latest_ckpt = None
 
     model = T.FlowTrainer(args)
-    trainer = pl.Trainer(gpus=1, logger=logger, max_epochs=args.epochs,
+    trainer = pl.Trainer(gpus=args.ngpus, logger=logger, max_epochs=args.epochs,
                          checkpoint_callback=logger is not None,
                          callbacks=clbks,
                          resume_from_checkpoint=latest_ckpt,
@@ -165,13 +166,29 @@ def plot_fit(args):
 
 def test_model(args):
     video, scene = get_video(args.input_video, args)
-    unique_name = f'{scene}_{args.step}_{args.name}'
+    unique_name = f'{scene}_{args.name}'
     latest_ckpt = max(glob(path.join('checkpoints', scene, args.name, '*.ckpt')),
                         default=path.join('checkpoints', scene, args.name, 'temp'),
                         key=path.getmtime)
     model = T.FlowTrainer.load_from_checkpoint(latest_ckpt, args=args, test_tag=unique_name)
-    trainer = pl.Trainer(gpus=1, logger=None)
+    trainer = pl.Trainer(gpus=args.ngpus, logger=None)
     trainer.test(model, video)
+    flow_files = [path.join('results', f) for f in os.listdir('results') \
+                  if f.startswith(f'flow_{unique_name}_epe')]
+    return flow_files, len(video.testset)
+
+
+def summarize_model(args):
+    root = path.dirname(args.input_video)
+    epe_accum, frame_accum = 0, 0
+    for scene in os.listdir(root):
+        args.input_video = path.join(root, scene)
+        files, num_frames = test_model(args)
+        assert len(files) == 1
+        epe = float(path.splitext(files[0])[0].split('_')[-1])
+        epe_accum += epe*num_frames
+        frame_accum += num_frames
+    print(f'Normalized AEPE: {epe_accum/frame_accum}')
 
 
 if __name__ == "__main__":
@@ -196,3 +213,5 @@ if __name__ == "__main__":
         plot_fit(args)
     elif args.operation == 'test':
         test_model(args)
+    elif args.operation == 'summarize':
+        summarize_model(args)
