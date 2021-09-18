@@ -23,7 +23,7 @@ def get_args():
     parser.add_argument('--step', type=int)
     parser.add_argument('--size', default=200, type=int)
     parser.add_argument('--batch', default=8, type=int)
-    parser.add_argument('--test-size', default=200, type=int)
+    parser.add_argument('--test-size', default=436, type=int)
     parser.add_argument('--test-batch', default=1, type=int)
     parser.add_argument('--downsample', type=int)
     parser.add_argument('--downsample-type', choices=['nearest', 'bilinear', 'bicubic', 'blurpool'])
