@@ -64,7 +64,7 @@ scene="$root/$(ls $root | head -$idx | tail -1)"
 application="python"
 
 #! Run options for the application:
-options="main.py train --wandb --occl wang --name l1_wang --input-video $scene --batch 3 --size 436 --test-batch 3"
+options="main.py train --wandb optical_flow --occl wang --name l1_wang --input-video $scene --batch 3 --size 436 --test-batch 3"
 
 #! Work directory (i.e. where the job will run):
 workdir="$~/sin-inn/video-interpolation"

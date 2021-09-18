@@ -18,7 +18,7 @@ def get_args():
     parser.add_argument('operation', choices=['metatrain', 'train', 'plot', 'test', 'summarize'])
     parser.add_argument('--ngpus', default=1, type=int)
     # Data options
-    parser.add_argument('--input-video', default='../datasets/sintel/training/final/market_5')
+    parser.add_argument('--input-video', default='../datasets/sintel/training/final/temple_3')
     parser.add_argument('--name', default='temp')
     parser.add_argument('--end', type=int)
     parser.add_argument('--step', type=int)
@@ -37,7 +37,7 @@ def get_args():
     parser.add_argument('--val-iter', default=50, type=int)
     parser.add_argument('--lr', default=1e-4, type=float)
     parser.add_argument('--meta-lr', type=float)
-    parser.add_argument('--wandb', action='store_true')
+    parser.add_argument('--wandb', choices=['optical_flow_exp', 'optical_flow'])
     parser.add_argument('--loss-photo', default='l1', choices=['l1', 'census', 'ssim', 'charbonnier'])
     parser.add_argument('--loss-smooth1', default=0.1, type=float)
     parser.add_argument('--loss-smooth2', default=0, type=float)
@@ -100,7 +100,7 @@ def train_model(args):
     logger, latest_ckpt = None, None
 
     if args.wandb:
-        logger = WandbLogger(project='optical_flow', name=f'{scene}_{args.name}')
+        logger = WandbLogger(project=args.wandb, name=f'{scene}_{args.name}')
         logger.log_hyperparams(args)
         latest_ckpt = max(glob(path.join('checkpoints', scene, args.name, '*.ckpt')),
                           default=path.join('checkpoints', scene, args.name, 'temp'),
