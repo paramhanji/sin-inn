@@ -25,7 +25,7 @@ class L1Loss(BaseLoss):
 # Photometric losses taken from:
 # https://github.com/lliuz/ARFlow/blob/e92a8bbe66f0ced244267f43e3e55ad0fe46ff3e/losses/loss_blocks.py#L7
 class CensusLoss(BaseLoss):
-    def __init__(self, weight=1, max_distance=1):
+    def __init__(self, weight=1, max_distance=2):
         super().__init__(weight=weight)
         self.max_distance = max_distance
         self.patch_size = 2 * max_distance + 1
@@ -63,7 +63,17 @@ class CensusLoss(BaseLoss):
         t2 = self._ternary_transform(im_warp * mask)
         dist = self._hamming_distance(t1, t2)
         valid = self._valid_mask(im)
-        return abs_robust_loss(dist * valid).mean() / mask.sum() * mask.numel()
+        return (dist * valid).mean() / mask.sum() * mask.numel()
+
+
+class L1CensusLoss(CensusLoss):
+    def __init__(self, weight=1, max_distance=2):
+        super().__init__(weight=weight, max_distance=max_distance)
+
+    def forward(self, im1, im2, mask):
+        l1_loss = torch.nn.functional.l1_loss(im1*mask, im2*mask) / mask.sum() * mask.numel()
+        census_loss = super().forward(im1, im2, mask)
+        return l1_loss + census_loss
 
 
 class SSIMLoss(BaseLoss):

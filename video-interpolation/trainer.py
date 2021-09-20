@@ -30,6 +30,8 @@ class FlowTrainer(pl.LightningModule):
             self.photometric = L.L1Loss()
         elif args.loss_photo == 'census':
             self.photometric = L.CensusLoss()
+        elif args.loss_photo == 'both':
+            self.photometric = L.L1CensusLoss()
         elif args.loss_photo == 'ssim':
             self.photometric = L.SSIMLoss()
         self.smooth1 = L.BaseLoss() if args.loss_smooth1 == 0 else \
@@ -67,7 +69,7 @@ class FlowTrainer(pl.LightningModule):
     def training_step(self, batch, batch_idx):
         frame1, frame2, times, scale = batch[:4]
         flow_fw, flow_bw = self.forward(frame1, times, scale[0])
-        if self.occlusion and self.current_epoch > self.args.occl_delay:
+        if self.occlusion:
             mask_fw = self.occlusion(flow_fw, flow_bw, self.args.occl_thresh).float()
             mask_bw = self.occlusion(flow_bw, flow_fw, self.args.occl_thresh).float()
         else:

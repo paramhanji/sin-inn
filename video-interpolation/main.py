@@ -38,14 +38,13 @@ def get_args():
     parser.add_argument('--lr', default=1e-4, type=float)
     parser.add_argument('--meta-lr', type=float)
     parser.add_argument('--wandb', choices=['optical_flow_exp', 'optical_flow'])
-    parser.add_argument('--loss-photo', default='l1', choices=['l1', 'census', 'ssim', 'charbonnier'])
-    parser.add_argument('--loss-smooth1', default=0.1, type=float)
+    parser.add_argument('--loss-photo', default='both', choices=['l1', 'census', 'both'])
+    parser.add_argument('--loss-smooth1', default=0.3, type=float)
     parser.add_argument('--loss-smooth2', default=0, type=float)
     parser.add_argument('--edge-constant', default=150, type=float)
     parser.add_argument('--edge-func', default='gauss', choices=['exp', 'gauss'])
-    parser.add_argument('--occl', default=None, choices=['brox', 'wang', None])
-    parser.add_argument('--occl-delay', default=1000, type=int)
-    parser.add_argument('--occl-thresh', default=0.6, type=float)
+    parser.add_argument('--occl', default='wang', choices=['brox', 'wang', None])
+    parser.add_argument('--occl-thresh', default=0.7, type=float)
     return parser.parse_args()
 
 
@@ -105,12 +104,8 @@ def train_model(args):
         latest_ckpt = max(glob(path.join('checkpoints', scene, args.name, '*.ckpt')),
                           default=path.join('checkpoints', scene, args.name, 'temp'),
                           key=path.getmtime)
-        if dataset.gt_available:
-            clbks = [ModelCheckpoint(monitor='val/EPE', every_n_epochs=args.epochs//100,
-                                     dirpath=path.dirname(latest_ckpt))]
-        else:
-            clbks = [ModelCheckpoint(every_n_epochs=args.epochs//100,
-                                     dirpath=path.dirname(latest_ckpt))]
+        clbks = [ModelCheckpoint(every_n_epochs=args.epochs//100,
+                                    dirpath=path.dirname(latest_ckpt))]
 
     else:
         clbks = []

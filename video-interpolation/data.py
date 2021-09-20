@@ -86,7 +86,6 @@ class Images(BaseMedia):
         else:
             self.gt_available = False
         self.flow_scale = self.video.shape[-1] / 5
-        # print('Dataset dimensions: ', self.video.shape)
 
     def readFlow(self, fn):
         '''

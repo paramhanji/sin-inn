@@ -100,10 +100,7 @@ def occlusion_wang(flow12, flow21, thresh):
     base_grid = mesh_grid(B, H, W).type_as(flow21)  # B2HW
 
     corr_map = get_corresponding_map(base_grid + flow21)  # BHW
-    if thresh is None:
-        occu_mask = corr_map.clamp(0, 1)
-    else:
-        occu_mask = corr_map < thresh
+    occu_mask = corr_map <= thresh
     return 1 - occu_mask.float()
 
 
