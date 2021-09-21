@@ -96,9 +96,8 @@ class FlowTrainer(pl.LightningModule):
         photo_loss = self.photometric(warped_fw, frame1, mask_fw) \
                      + self.photometric(warped_bw, frame2, mask_bw)
         smooth1_loss = self.smooth1(frame1, flow_fw) + self.smooth1(frame2, flow_bw)
-        # smooth2_loss = self.smooth2(frame1, flow_fw) + self.smooth2(frame2, flow_bw)
 
-        loss = photo_loss + smooth1_loss # + smooth2_loss
+        loss = photo_loss + smooth1_loss
         self.log('train/loss', loss.detach(), on_step=True, on_epoch=False)
 
         psnr = self.psnr(warped_fw, frame1).detach()

@@ -73,7 +73,7 @@ class L1CensusLoss(CensusLoss):
     def forward(self, im1, im2, mask):
         l1_loss = torch.nn.functional.l1_loss(im1*mask, im2*mask) / mask.sum() * mask.numel()
         census_loss = super().forward(im1, im2, mask)
-        return l1_loss + census_loss
+        return l1_loss + 0.1*census_loss
 
 
 class SSIMLoss(BaseLoss):
