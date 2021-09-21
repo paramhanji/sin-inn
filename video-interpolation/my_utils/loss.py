@@ -54,7 +54,7 @@ class CensusLoss(BaseLoss):
 
     def _valid_mask(self, t):
         n, _, h, w = t.size()
-        inner = torch.ones(n, 1, h - 2 * self.max_distance, w - 2 * self.max_distance).type_as(t)
+        inner = torch.ones(n, 1, h - 2 * self.max_distance, w - 2 * self.max_distance, dtype=bool).to(t.device)
         mask = torch.nn.functional.pad(inner, [self.max_distance] * 4)
         return mask
 

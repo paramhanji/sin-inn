@@ -39,6 +39,7 @@ def get_args():
     parser.add_argument('--meta-lr', type=float)
     parser.add_argument('--wandb', choices=['optical_flow_exp', 'optical_flow'])
     parser.add_argument('--loss-photo', default='both', choices=['l1', 'census', 'both'])
+    parser.add_argument('--census-width', default=3, type=int)
     parser.add_argument('--loss-smooth1', default=0.3, type=float)
     parser.add_argument('--loss-smooth2', default=0, type=float)
     parser.add_argument('--edge-constant', default=150, type=float)

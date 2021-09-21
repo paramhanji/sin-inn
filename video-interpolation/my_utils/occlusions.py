@@ -101,7 +101,7 @@ def occlusion_wang(flow12, flow21, thresh):
 
     corr_map = get_corresponding_map(base_grid + flow21)  # BHW
     occu_mask = corr_map <= thresh
-    return 1 - occu_mask.float()
+    return torch.logical_not(occu_mask).float()
 
 
 def occlusion_unity(flow, *args):

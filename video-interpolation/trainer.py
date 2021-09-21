@@ -29,9 +29,9 @@ class FlowTrainer(pl.LightningModule):
         if args.loss_photo == 'l1':
             self.photometric = L.L1Loss()
         elif args.loss_photo == 'census':
-            self.photometric = L.CensusLoss()
+            self.photometric = L.CensusLoss(max_distance=args.census_width)
         elif args.loss_photo == 'both':
-            self.photometric = L.L1CensusLoss()
+            self.photometric = L.L1CensusLoss(max_distance=args.census_width)
         elif args.loss_photo == 'ssim':
             self.photometric = L.SSIMLoss()
         self.smooth1 = L.BaseLoss() if args.loss_smooth1 == 0 else \
@@ -70,8 +70,8 @@ class FlowTrainer(pl.LightningModule):
         frame1, frame2, times, scale = batch[:4]
         flow_fw, flow_bw = self.forward(frame1, times, scale[0])
         if self.occlusion:
-            mask_fw = self.occlusion(flow_fw, flow_bw, self.args.occl_thresh).float()
-            mask_bw = self.occlusion(flow_bw, flow_fw, self.args.occl_thresh).float()
+            mask_fw = self.occlusion(flow_fw, flow_bw, self.args.occl_thresh)
+            mask_bw = self.occlusion(flow_bw, flow_fw, self.args.occl_thresh)
         else:
             mask_fw, mask_bw = torch.ones(2)
         if len(batch) == 5:
@@ -96,13 +96,14 @@ class FlowTrainer(pl.LightningModule):
         photo_loss = self.photometric(warped_fw, frame1, mask_fw) \
                      + self.photometric(warped_bw, frame2, mask_bw)
         smooth1_loss = self.smooth1(frame1, flow_fw) + self.smooth1(frame2, flow_bw)
-        smooth2_loss = self.smooth2(frame1, flow_fw) + self.smooth2(frame2, flow_bw)
+        # smooth2_loss = self.smooth2(frame1, flow_fw) + self.smooth2(frame2, flow_bw)
 
-        loss = photo_loss + smooth1_loss + smooth2_loss
+        loss = photo_loss + smooth1_loss # + smooth2_loss
         self.log('train/loss', loss.detach(), on_step=True, on_epoch=False)
 
         psnr = self.psnr(warped_fw, frame1).detach()
         self.log('train/PSNR', psnr, on_step=False, on_epoch=True)
+        torch.cuda.empty_cache()
         return loss
 
     def on_train_end(self) -> None:
