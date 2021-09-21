@@ -36,8 +36,6 @@ class FlowTrainer(pl.LightningModule):
             self.photometric = L.SSIMLoss()
         self.smooth1 = L.BaseLoss() if args.loss_smooth1 == 0 else \
                        L.BilateralSmooth(args.edge_func, args.edge_constant, 1, args.loss_smooth1)
-        self.smooth2 = L.BaseLoss() if args.loss_smooth2 == 0 else \
-                       L.BilateralSmooth(args.edge_func, args.edge_constant, 2, args.loss_smooth2)
         self.downsample = None
         if args.downsample:
             assert args.downsample_type is not None

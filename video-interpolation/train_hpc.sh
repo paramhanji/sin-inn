@@ -10,9 +10,9 @@
 
 #! sbatch directives begin here ###############################
 #! Name of the job:
-#SBATCH -J flow_l1_wang
+#SBATCH -J flow
 #! Which project should be charged (NB Wilkes2 projects end in '-GPU'):
-#SBATCH -A MANTIUK-SL2-GPU
+#SBATCH -A MANTIUK-SL3-GPU
 #! How many whole nodes should be allocated?
 #SBATCH --nodes=1
 #! How many (MPI) tasks will there be in total?
@@ -29,7 +29,7 @@
 #! interrupted by node failure or system downtime):
 ##SBATCH --no-requeue
 #! Number of entries in job array
-#SBATCH --array=1-24
+#SBATCH --array=1-23
 
 #! Do not change:
 #SBATCH -p pascal
@@ -43,7 +43,7 @@
 numnodes=$SLURM_JOB_NUM_NODES
 numtasks=$SLURM_NTASKS
 mpi_tasks_per_node=$(echo "$SLURM_TASKS_PER_NODE" | sed -e  's/^\([0-9][0-9]*\).*$/\1/')
-idx=$(($SLURM_ARRAY_TASK_ID - 1))
+idx=$SLURM_ARRAY_TASK_ID
 #! ############################################################
 #! Modify the settings below to specify the application's environment, location 
 #! and launch method:
@@ -64,7 +64,7 @@ scene="$root/$(ls $root | head -$idx | tail -1)"
 application="python"
 
 #! Run options for the application:
-options="main.py train --wandb optical_flow --occl wang --name l1_wang --input-video $scene --batch 3 --size 436 --test-batch 3"
+options="main.py train --wandb optical_flow --name both3.1 --input-video $scene --batch 3 --epochs 5000 --val-iter 5001"
 
 #! Work directory (i.e. where the job will run):
 workdir="$~/sin-inn/video-interpolation"
