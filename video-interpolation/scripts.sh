@@ -1,0 +1,1 @@
+scp -r hpc:checkpoints/wall hpc:checkpoints/ambush_1/ hpc:checkpoints/ambush_3/ hpc:checkpoints/bamboo_3/ hpc:checkpoints/cave_3/ hpc:checkpoints/market_1/ hpc:checkpoints/market_4/ hpc:checkpoints/mountain_2/ hpc:checkpoints/PERTURBED_market_3/ hpc:checkpoints/PERTURBED_shaman_1/ hpc:checkpoints/temple_1/ checkpoints/ hpc:checkpoints/tiger checkpoints

@@ -1,6 +1,7 @@
 from glob import glob
 import os, os.path as path
 import argparse
+from tqdm import tqdm
 
 import torch, numpy as np, wandb, pytorch_lightning as pl
 from pytorch_lightning.loggers import WandbLogger
@@ -11,10 +12,11 @@ import trainer as T
 import model as M
 import progressive_controller as C
 from my_utils.flow_viz import flow2img
+from my_utils.utils import writeFlow
 
 def get_args():
     parser = argparse.ArgumentParser()
-    parser.add_argument('operation', choices=['train', 'test', 'summarize'])
+    parser.add_argument('operation', choices=['train', 'test', 'summarize', 'sintel'])
     parser.add_argument('--ngpus', default=1, type=int)
     # Data options
     parser.add_argument('--input-video', default='../datasets/sintel/training/final/temple_3')
@@ -86,8 +88,8 @@ def test_model(args):
     video, scene = get_video(args.input_video, args)
     unique_name = f'{scene}_{args.name}'
     latest_ckpt = max(glob(path.join('checkpoints', scene, args.name, '*.ckpt')),
-                        default=path.join('checkpoints', scene, args.name, 'temp'),
-                        key=path.getmtime)
+                      default=path.join('checkpoints', scene, args.name, 'temp'),
+                      key=path.getmtime)
     model = T.FlowTrainer.load_from_checkpoint(latest_ckpt, args=args, test_tag=unique_name)
     trainer = pl.Trainer(gpus=args.ngpus, logger=None)
     trainer.test(model, video)
@@ -109,6 +111,31 @@ def summarize_model(args):
     print(f'Normalized AEPE: {epe_accum/frame_accum}')
 
 
+def sintel_submission(args):
+    with torch.no_grad():
+        device = 'cuda' if args.ngpus == 0 else 'cuda'
+        root = path.dirname(args.input_video)
+        for scene in tqdm(os.listdir(root)):
+            video, sc = get_video(path.join(root, scene), args)
+            latest_ckpt = max(glob(path.join('checkpoints', scene, args.name, '*.ckpt')),
+                              default=path.join('checkpoints', scene, args.name, 'temp'),
+                              key=path.getmtime)
+            model = T.FlowTrainer.load_from_checkpoint(latest_ckpt, args=args)
+            model.net.to(device)
+            if args.name.endswith('clean'):
+                outdir = path.join('sintel_submission', 'clean', scene)
+            if args.name.endswith('final'):
+                outdir = path.join('sintel_submission', 'final', scene)
+            if not path.isdir(outdir):
+                os.makedirs(outdir)
+            for i, batch in enumerate(video.testset):
+                f1, _, t, s = batch[:4]
+                f1 ,t = f1.to(device).unsqueeze(0), t.to(device).unsqueeze(0)
+                flow, _ = model(f1, t, s)
+                flow = flow.squeeze(0).permute(1,2,0).cpu().numpy()
+                writeFlow(path.join(outdir, f'frame_{i+1:04d}.flo'), flow)
+
+
 if __name__ == "__main__":
     args = get_args()
 
@@ -127,3 +154,5 @@ if __name__ == "__main__":
         test_model(args)
     elif args.operation == 'summarize':
         summarize_model(args)
+    elif args.operation == 'sintel':
+        sintel_submission(args)

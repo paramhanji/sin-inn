@@ -153,3 +153,6 @@ checkpoints/
 # HPC files
 machine.file.*
 slurm-*.out
+
+# Sintel files
+sintel_submission

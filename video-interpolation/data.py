@@ -1,10 +1,11 @@
-import numpy as np, torch
-import torch.utils.data as data
+import torch, torch.utils.data as data
 import PIL, imageio
 import torchvision.transforms as T
 import pytorch_lightning as pl
 import os, os.path as path
 import abc
+
+from my_utils.utils import readFlow
 
 class BaseMedia(abc.ABC, data.Dataset):
     def __len__(self):
@@ -79,35 +80,13 @@ class Images(BaseMedia):
         if path.isdir(flow_dir):
             self.gt_available = True
             rescale_ratio = size / h
-            flows = [self.readFlow(path.join(flow_dir, scene, f'frame_{i+1:04d}.flo'))
+            flows = [readFlow(path.join(flow_dir, scene, f'frame_{i+1:04d}.flo'))
                      for i in range(num_frames - 1)]
             trans = T.Compose([lambda x: torch.tensor(x).permute(2,0,1), T.Resize(size, antialias=True)])
             self.flow = torch.stack([trans(f) for f in flows]) * rescale_ratio
         else:
             self.gt_available = False
         self.flow_scale = self.video.shape[-1] / 5
-
-    def readFlow(self, fn):
-        '''
-        Read .flo file in Middlebury format
-        Reference: http://stackoverflow.com/questions/
-                   28013200/reading-middlebury-flow-files-with-python-bytes-array-numpy
-
-        WARNING: this will work on little-endian architectures (eg Intel x86) only!
-        '''
-        with open(fn, 'rb') as f:
-            magic = np.fromfile(f, np.float32, count=1)
-            if 202021.25 != magic:
-                print('Magic number incorrect. Invalid .flo file')
-                return None
-            else:
-                w = np.fromfile(f, np.int32, count=1)
-                h = np.fromfile(f, np.int32, count=1)
-                # print 'Reading %d x %d flo file\n' % (w, h)
-                data = np.fromfile(f, np.float32, count=2*int(w)*int(h))
-                # Reshape data into 3D array (columns, rows, bands)
-                # The reshape here is for visualization, the original code is (w,h,2)
-                return np.resize(data, (int(h), int(w), 2))
 
 
 class LightningLoader(pl.LightningDataModule):
@@ -127,11 +106,9 @@ class LightningLoader(pl.LightningDataModule):
 
 def get_video(input_video, args):
     if path.isdir(input_video):
-        print('Reading images from directory')
         trainset = Images(input_video, size=args.size)
         testset = Images(input_video, size=args.test_size)
     else:
-        print('Extracting frames from video')
         trainset = VideoClip(input_video, 0, args.end, args.step, size=args.size)
         testset = VideoClip(input_video, 0, args.end, args.step, size=args.test_size)
 
