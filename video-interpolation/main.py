@@ -34,7 +34,7 @@ def get_args():
     parser.add_argument('--epochs', default=1000, type=int)
     parser.add_argument('--val-iter', default=50, type=int)
     parser.add_argument('--lr', default=1e-4, type=float)
-    parser.add_argument('--wandb', choices=['optical_flow_exp', 'optical_flow'])
+    parser.add_argument('--wandb', choices=['optical_flow_exp', 'optical_flow', 'optical_flow_test'])
     parser.add_argument('--loss-photo', default='both', choices=['l1', 'census', 'both'])
     parser.add_argument('--census-width', default=3, type=int)
     parser.add_argument('--loss-smooth1', default=0.1, type=float)

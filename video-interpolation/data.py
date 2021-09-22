@@ -135,7 +135,8 @@ def get_video(input_video, args):
         trainset = VideoClip(input_video, 0, args.end, args.step, size=args.size)
         testset = VideoClip(input_video, 0, args.end, args.step, size=args.test_size)
 
-    print(f'Max flow: {trainset.flow.max().item()}, estimated scale: {trainset.flow_scale}')
+    if trainset.gt_available:
+        print(f'Max flow: {trainset.flow.max().item()}, estimated scale: {trainset.flow_scale}')
     video_clip = LightningLoader(trainset, testset, args.batch, args.test_batch)
     scene, _ = path.splitext(path.basename(input_video))
     return video_clip, scene
