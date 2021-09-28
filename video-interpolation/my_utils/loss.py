@@ -15,17 +15,20 @@ class BaseLoss(torch.nn.Module):
 
 class L1Loss(BaseLoss):
     """Wrapper for torch.nn.l1 to use occlusion mask"""
-    def __init__(self, weight=1):
+    def __init__(self, weight):
         super().__init__(weight)
 
     def forward(self, im1, im2, mask):
-        return torch.nn.functional.l1_loss(im1*mask, im2*mask) / mask.sum() * mask.numel()
+        if self.weight == 0:
+            return super().forward()
+
+        return torch.nn.functional.l1_loss(im1*mask, im2*mask) / mask.sum() * mask.numel() * self.weight
 
 
 # Photometric losses taken from:
 # https://github.com/lliuz/ARFlow/blob/e92a8bbe66f0ced244267f43e3e55ad0fe46ff3e/losses/loss_blocks.py#L7
 class CensusLoss(BaseLoss):
-    def __init__(self, weight=1, max_distance=2):
+    def __init__(self, weight, max_distance=2):
         super().__init__(weight=weight)
         self.max_distance = max_distance
         self.patch_size = 2 * max_distance + 1
@@ -59,29 +62,25 @@ class CensusLoss(BaseLoss):
         return mask
 
     def forward(self, im, im_warp, mask):
+        if self.weight == 0:
+            return super().forward()
+
         t1 = self._ternary_transform(im * mask)
         t2 = self._ternary_transform(im_warp * mask)
         dist = self._hamming_distance(t1, t2)
         valid = self._valid_mask(im)
-        return (dist * valid).mean() / mask.sum() * mask.numel()
-
-
-class L1CensusLoss(CensusLoss):
-    def __init__(self, weight=1, max_distance=2):
-        super().__init__(weight=weight, max_distance=max_distance)
-
-    def forward(self, im1, im2, mask):
-        l1_loss = torch.nn.functional.l1_loss(im1*mask, im2*mask) / mask.sum() * mask.numel()
-        census_loss = super().forward(im1, im2, mask)
-        return l1_loss + 0.1*census_loss
+        return (dist * valid).mean() / mask.sum() * mask.numel() * self.weight
 
 
 class SSIMLoss(BaseLoss):
-    def __init__(self, weight=1, md=1):
+    def __init__(self, weight, md=1):
         super().__init__(weight=weight)
         self.md = md
 
     def forward(self, x, y, mask):
+        if self.weight == 0:
+            return super().forward()
+
         x, y = x*mask, y*mask
         patch_size = 2 * self.md + 1
         C1 = 0.01 ** 2
@@ -101,12 +100,12 @@ class SSIMLoss(BaseLoss):
         SSIM_d = (mu_x_sq + mu_y_sq + C1) * (sigma_x + sigma_y + C2)
         SSIM = SSIM_n / SSIM_d
         dist = torch.clamp((1 - SSIM) / 2, 0, 1)
-        return dist.mean() / mask.sum() * mask.numel()
+        return dist.mean() / mask.sum() * mask.numel() * self.weight
 
 
 class BilateralSmooth(BaseLoss):
     """Edge-aware First and second order smoothness loss"""
-    def __init__(self, abs_fun, edge_constant, order, weight):
+    def __init__(self, weight, abs_fun, edge_constant, order):
         super().__init__(weight)
         if abs_fun == 'exp':
             self.abs_fun = torch.abs
@@ -116,6 +115,9 @@ class BilateralSmooth(BaseLoss):
         self.order = order
 
     def forward(self, img, flow):
+        if self.weight == 0:
+            return super().forward()
+
         img_gx, img_gy = image_grads(img, stride=self.order)
         flow_gx, flow_gy = image_grads(flow)
         w_x = torch.exp(-self.abs_fun(self.edge_constant * img_gx).mean(dim=1)).unsqueeze(1)

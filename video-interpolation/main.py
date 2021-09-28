@@ -24,53 +24,49 @@ def get_args():
     parser.add_argument('--end', type=int)
     parser.add_argument('--step', type=int)
     parser.add_argument('--size', default=436, type=int)
-    parser.add_argument('--batch', default=2, type=int)
+    parser.add_argument('--batch', default=1, type=int)
     parser.add_argument('--test-size', default=436, type=int)
-    parser.add_argument('--test-batch', default=2, type=int)
-    parser.add_argument('--downsample', type=int)
-    parser.add_argument('--downsample-type', choices=['nearest', 'bilinear', 'bicubic', 'blurpool'])
+    parser.add_argument('--test-batch', default=1, type=int)
     # Network options
-    parser.add_argument('--net', default='siren')
+    parser.add_argument('--net', default='RBF')
     parser.add_argument('--spatially-adaptive', action='store_true')
     # Train options
     parser.add_argument('--epochs', default=1000, type=int)
-    parser.add_argument('--val-iter', default=50, type=int)
+    parser.add_argument('--val-iter', type=int)
     parser.add_argument('--lr', default=1e-4, type=float)
-    parser.add_argument('--wandb', choices=['optical_flow_exp', 'optical_flow', 'optical_flow_test'])
-    parser.add_argument('--loss-photo', default='both', choices=['l1', 'census', 'both'])
+    parser.add_argument('--loss-l1', default=1, type=float)
+    parser.add_argument('--loss-census', default=0.1, type=float)
+    parser.add_argument('--loss-ssim', default=0, type=float)
     parser.add_argument('--census-width', default=3, type=int)
     parser.add_argument('--loss-smooth1', default=0.1, type=float)
     parser.add_argument('--edge-constant', default=150, type=float)
     parser.add_argument('--edge-func', default='gauss', choices=['exp', 'gauss'])
     parser.add_argument('--occl', default='wang', choices=['brox', 'wang', None])
     parser.add_argument('--occl-thresh', default=0.7, type=float)
+    # Logging options
+    parser.add_argument('--wandb', choices=['optical_flow_exp', 'optical_flow', 'optical_flow_test'])
+    parser.add_argument('--log-gt', action='store_true')
     return parser.parse_args()
 
 
 def train_model(args):
     video, scene = get_video(args.input_video, args)
     dataset = video.testset
-    if not dataset.gt_available:
+    if not args.val_iter:
         args.val_iter = args.epochs + 1
-    logger, latest_ckpt = None, None
 
+    logger, latest_ckpt, clbks = None, None, []
     if args.wandb:
         logger = WandbLogger(project=args.wandb, name=f'{scene}_{args.name}')
         logger.log_hyperparams(args)
-        latest_ckpt = max(glob(path.join('checkpoints', scene, args.name, '*.ckpt')),
-                          default=path.join('checkpoints', scene, args.name, 'temp'),
-                          key=path.getmtime)
-        clbks = [ModelCheckpoint(every_n_epochs=args.epochs//100,
-                                    dirpath=path.dirname(latest_ckpt))]
-
-    else:
-        clbks = []
-    if latest_ckpt and not path.isfile(latest_ckpt):
+        ckpt_dir = path.join('checkpoints', scene, args.name)
+        clbks = [ModelCheckpoint(every_n_epochs=args.epochs//100, dirpath=ckpt_dir)]
+        latest_ckpt = max(glob(path.join(ckpt_dir, '*.ckpt')), default=None, key=path.getmtime)
+    if args.log_gt:
         logger.experiment.log({'source': wandb.Video((dataset.video * 255).type(torch.uint8))})
         if dataset.gt_available:
             flows = torch.stack([flow2img(f) for f in dataset.flow])
             logger.experiment.log({'gt_flow': wandb.Video(flows)})
-        latest_ckpt = None
 
     model = T.FlowTrainer(args)
     trainer = pl.Trainer(gpus=args.ngpus, logger=logger, max_epochs=args.epochs,
@@ -88,7 +84,6 @@ def test_model(args):
     video, scene = get_video(args.input_video, args)
     unique_name = f'{scene}_{args.name}'
     latest_ckpt = max(glob(path.join('checkpoints', scene, args.name, '*.ckpt')),
-                      default=path.join('checkpoints', scene, args.name, 'temp'),
                       key=path.getmtime)
     model = T.FlowTrainer.load_from_checkpoint(latest_ckpt, args=args, test_tag=unique_name)
     trainer = pl.Trainer(gpus=args.ngpus, logger=None)
@@ -116,9 +111,8 @@ def sintel_submission(args):
         device = 'cuda' if args.ngpus == 0 else 'cuda'
         root = path.dirname(args.input_video)
         for scene in tqdm(os.listdir(root)):
-            video, sc = get_video(path.join(root, scene), args)
+            video, _ = get_video(path.join(root, scene), args)
             latest_ckpt = max(glob(path.join('checkpoints', scene, args.name, '*.ckpt')),
-                              default=path.join('checkpoints', scene, args.name, 'temp'),
                               key=path.getmtime)
             model = T.FlowTrainer.load_from_checkpoint(latest_ckpt, args=args)
             model.net.to(device)

@@ -1,7 +1,4 @@
 import torch
-from torch.nn.functional import interpolate
-from torchvision.transforms import Resize, functional
-from kornia.filters import BlurPool2D
 import pytorch_lightning as pl
 import torchmetrics as metrics
 import imageio as io
@@ -9,6 +6,7 @@ import wandb
 
 import my_utils.loss as L
 import my_utils.occlusions as O
+import my_utils.softsplat as S
 from my_utils.resample2d import Resample2d
 from my_utils.flow_viz import flow2img
 from my_utils.utils import *
@@ -26,29 +24,10 @@ class FlowTrainer(pl.LightningModule):
             self.occlusion = O.occlusion_brox
         elif args.occl == 'wang':
             self.occlusion = O.occlusion_wang
-        if args.loss_photo == 'l1':
-            self.photometric = L.L1Loss()
-        elif args.loss_photo == 'census':
-            self.photometric = L.CensusLoss(max_distance=args.census_width)
-        elif args.loss_photo == 'both':
-            self.photometric = L.L1CensusLoss(max_distance=args.census_width)
-        elif args.loss_photo == 'ssim':
-            self.photometric = L.SSIMLoss()
-        self.smooth1 = L.BaseLoss() if args.loss_smooth1 == 0 else \
-                       L.BilateralSmooth(args.edge_func, args.edge_constant, 1, args.loss_smooth1)
-        self.downsample = None
-        if args.downsample:
-            assert args.downsample_type is not None
-            if args.downsample_type == 'nearest':
-                self.downsample = Resize(self.args.size // args.downsample)
-            elif args.downsample_type == 'bilinear':
-                self.downsample = Resize(self.args.size // args.downsample,
-                                         interpolation=functional.InterpolationMode.BILINEAR)
-            elif args.downsample_type == 'bicubic':
-                self.downsample = Resize(self.args.size // args.downsample,
-                                         interpolation=functional.InterpolationMode.BICUBIC)
-            elif args.downsample_type == 'blurpool':
-                self.downsample = BlurPool2D(4, stride=args.downsample)
+        self.l1 = L.L1Loss(args.loss_l1)
+        self.census = L.CensusLoss(args.loss_census, max_distance=args.census_width)
+        self.ssim = L.SSIMLoss(args.loss_ssim)
+        self.smooth1 = L.BilateralSmooth(args.loss_smooth1, args.edge_func, args.edge_constant, 1)
 
         self.psnr = metrics.PSNR()
         self.test_tag = test_tag
@@ -66,44 +45,46 @@ class FlowTrainer(pl.LightningModule):
 
     def training_step(self, batch, batch_idx):
         frame1, frame2, times, scale = batch[:4]
-        flow_fw, flow_bw = self.forward(frame1, times, scale[0])
+        flow12, flow21 = self.forward(frame1, times, scale[0])
         if self.occlusion:
-            mask_fw = self.occlusion(flow_fw, flow_bw, self.args.occl_thresh)
-            mask_bw = self.occlusion(flow_bw, flow_fw, self.args.occl_thresh)
+            mask1 = self.occlusion(flow12, flow21, self.args.occl_thresh)
+            mask2 = self.occlusion(flow21, flow12, self.args.occl_thresh)
         else:
-            mask_fw, mask_bw = torch.ones(2)
+            mask1, mask2 = torch.ones(2)
         if len(batch) == 5:
-            gt_flow = batch[-1]
-            epe = torch.sum((flow_fw - gt_flow)**2, dim=1).sqrt().mean().detach()
-            self.log('train/EPE', epe, on_step=False, on_epoch=True)
+            with torch.no_grad():
+                gt_flow = batch[-1]
+                epe = torch.sum((flow12 - gt_flow)**2, dim=1).sqrt().mean().detach()
+                self.log('train/EPE', epe, on_step=False, on_epoch=True)
 
-        if self.downsample:
-            # Enable antialiasing for downsampling the input frame
-            new_h = frame1.size(2) // self.args.downsample
-            frame1 = Resize(new_h, antialias=True)(frame1)
-            frame2 = Resize(new_h, antialias=True)(frame2)
-            # No antialising for tensors that require autodiff
-            flow_fw = self.downsample(flow_fw) / self.args.downsample
-            flow_bw = self.downsample(flow_bw) / self.args.downsample
-            if mask_fw.ndim == 4:
-                mask_fw = self.downsample(mask_fw)
-                mask_bw = self.downsample(mask_bw)
+        warped2 = self.resample(frame1, flow21)
+        metric = torch.nn.functional.l1_loss(frame2, warped2, reduction='none').mean(1, True)
+        softmax1 = S.FunctionSoftsplat(frame2, flow21, -20*metric, strType='softmax')
+        # mask1 = mask1 * (softmax1 != 0)
+        warped1 = self.resample(frame2, flow12)
+        metric = torch.nn.functional.l1_loss(frame1, warped1, reduction='none').mean(1, True)
+        softmax2 = S.FunctionSoftsplat(frame1, flow12, -20*metric, strType='softmax')
+        # mask2 = mask2 * (softmax2 != 0)
 
-        warped_fw = self.resample(frame2, flow_fw)
-        warped_bw = self.resample(frame1, flow_bw)
-        photo_loss = self.photometric(warped_fw, frame1, mask_fw) \
-                     + self.photometric(warped_bw, frame2, mask_bw)
-        smooth1_loss = self.smooth1(frame1, flow_fw) + self.smooth1(frame2, flow_bw)
+        l1_loss = self.l1(softmax1, frame1, mask1) + self.l1(softmax2, frame2, mask2)
+        census_loss = self.census(softmax1, frame1, mask1) + self.census(softmax2, frame2, mask2)
+        ssim_loss = self.ssim(softmax1, frame1, mask1) + self.ssim(softmax2, frame2, mask2)
+        smooth_loss = self.smooth1(frame1, flow12) + self.smooth1(frame2, flow21)
+        loss = l1_loss + census_loss + ssim_loss + smooth_loss
 
-        loss = photo_loss + smooth1_loss
-        self.log('train/loss', loss.detach(), on_step=True, on_epoch=False)
-
-        psnr = self.psnr(warped_fw, frame1).detach()
-        self.log('train/PSNR', psnr, on_step=False, on_epoch=True)
+        with torch.no_grad():
+            self.log('train/loss', loss, on_step=True, on_epoch=False)
+            self.log('train/l1', l1_loss, on_step=True, on_epoch=False)
+            self.log('train/census', census_loss, on_step=True, on_epoch=False)
+            if ssim_loss != 0:
+                self.log('train/ssim', ssim_loss, on_step=True, on_epoch=False)
+            self.log('train/smooth', smooth_loss, on_step=True, on_epoch=False)
+            psnr = self.psnr(softmax2, frame2)
+            self.log('train/PSNR', psnr, on_step=False, on_epoch=True)
         torch.cuda.empty_cache()
         return loss
 
-    def on_train_end(self) -> None:
+    def on_train_end(self):
         self.completed_training = True
         return super().on_train_end()
 
