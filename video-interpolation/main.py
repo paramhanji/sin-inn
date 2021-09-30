@@ -19,7 +19,7 @@ def get_args():
     parser.add_argument('operation', choices=['train', 'test', 'summarize', 'sintel'])
     parser.add_argument('--ngpus', default=1, type=int)
     # Data options
-    parser.add_argument('--input-video', default='../datasets/sintel/training/final/temple_3')
+    parser.add_argument('--input-video', default='../datasets/sintel/training/final/alley_1')
     parser.add_argument('--name', default='temp')
     parser.add_argument('--end', type=int)
     parser.add_argument('--step', type=int)

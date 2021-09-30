@@ -60,17 +60,18 @@ class FlowTrainer(pl.LightningModule):
         warped2 = self.resample(frame1, flow21)
         metric = torch.nn.functional.l1_loss(frame2, warped2, reduction='none').mean(1, True)
         softmax1 = S.FunctionSoftsplat(frame2, flow21, -20*metric, strType='softmax')
-        # mask1 = mask1 * (softmax1 != 0)
+        mask1 = mask1 * (softmax1 != 0)
         warped1 = self.resample(frame2, flow12)
         metric = torch.nn.functional.l1_loss(frame1, warped1, reduction='none').mean(1, True)
         softmax2 = S.FunctionSoftsplat(frame1, flow12, -20*metric, strType='softmax')
-        # mask2 = mask2 * (softmax2 != 0)
+        mask2 = mask2 * (softmax2 != 0)
 
         l1_loss = self.l1(softmax1, frame1, mask1) + self.l1(softmax2, frame2, mask2)
         census_loss = self.census(softmax1, frame1, mask1) + self.census(softmax2, frame2, mask2)
         ssim_loss = self.ssim(softmax1, frame1, mask1) + self.ssim(softmax2, frame2, mask2)
         smooth_loss = self.smooth1(frame1, flow12) + self.smooth1(frame2, flow21)
         loss = l1_loss + census_loss + ssim_loss + smooth_loss
+        self.net.stash_iteration(loss)
 
         with torch.no_grad():
             self.log('train/loss', loss, on_step=True, on_epoch=False)
