@@ -1,6 +1,7 @@
 import torch
 import pytorch_lightning as pl
 import torchmetrics as metrics
+from apex.optimizers import FusedLAMB
 import imageio as io
 import wandb
 
@@ -131,4 +132,4 @@ class FlowTrainer(pl.LightningModule):
         return epe
 
     def configure_optimizers(self):
-        return torch.optim.Adam(self.net.parameters(), lr=self.lr)
+        return FusedLAMB(self.net.parameters(), lr=self.lr)

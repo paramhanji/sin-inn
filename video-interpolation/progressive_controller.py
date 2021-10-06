@@ -78,7 +78,7 @@ class ProgressiveEncoderController(nn.Module, abc.ABC):
 
     def state_dict(self, destination=None, prefix='', keep_vars=False):
         self.save_mask()
-        return super(ProgressiveEncoderController, self).state_dict()
+        return super(ProgressiveEncoderController, self).state_dict(destination, prefix, keep_vars)
 
     def __init__(self, model: pe_models.ProgressiveModel):
         super(ProgressiveEncoderController, self).__init__()

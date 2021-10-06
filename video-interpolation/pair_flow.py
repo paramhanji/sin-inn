@@ -10,6 +10,7 @@ import my_utils.loss as L
 import my_utils.softsplat as S
 import my_utils.occlusions as O
 import warnings
+from apex.optimizers import FusedLAMB, FusedNovoGrad
 
 def plot_img_grid(*imgs):
     # print()
@@ -18,7 +19,7 @@ def plot_img_grid(*imgs):
     _, axes = plt.subplots(N, 1, squeeze=False, dpi=300)
     for ax, im in zip(axes[:,0], imgs):
         if torch.is_tensor(im) and im.size(1) == 2:
-            im = flow2img(im[0].cpu(), clip=10)
+            im = flow2img(im[0].cpu(), clip=50)
         if torch.is_tensor(im):
             im = im.squeeze().permute(1,2,0).cpu()
         ax.imshow(im)
@@ -26,16 +27,16 @@ def plot_img_grid(*imgs):
     plt.show()
 
 # %%
-video = D.Images('../datasets/sintel/training/final/bamboo_2', 436)
-frame1, frame2, _, scale, gt = video[40]
+video = D.Images('../datasets/sintel/training/final/temple_2', 436)
+frame1, frame2, _, scale, gt = video[28]
 _, h, w = frame1.shape
 plot_img_grid(frame1, frame2, gt[None])
 frame1, frame2, gt = frame1[None].cuda(), frame2[None].cuda(), gt.cuda()
 
 # %%
 print('prbf12_mask')
-epochs = 2500
-params = M.ModelParams(domain_dim=2, std_rbf=12)
+epochs = 1000
+params = M.ModelParams(domain_dim=2, std_rbf=50, std=50)
 net = M.model_dict['PRBF'](params).cuda()
 if net.is_progressive:
     net = C.LinearControllerEarly(net, epochs, epsilon=1e-3)
@@ -44,9 +45,10 @@ l1 = L.L1Loss(1)
 census = L.CensusLoss(0.1, max_distance=3)
 smooth1 = L.BilateralSmooth(0.1, 'gauss', 150, 1)
 occlusion = O.occlusion_wang
-opt = torch.optim.Adam(net.parameters(), lr=5e-4)
+opt = torch.optim.AdamW(net.parameters(), lr=1e-3)
+opt = FusedLAMB(net.parameters(), lr=1e-3)
+# opt = FusedNovoGrad(net.parameters(), lr=1e-3)
 
-# %%
 pbar = tqdm.trange(epochs)
 for epoch in pbar:
     opt.zero_grad()
@@ -85,10 +87,7 @@ for epoch in pbar:
         pbar.set_postfix({'l1':l1_loss.item(), 'census':census_loss.item(), 'smooth':smooth_loss.item(), 'epe':epe})
         torch.cuda.empty_cache()
         if (epoch + 1) % (epochs//5) == 0:
-            print()
-            # plot_img_grid(flow12)
-
-plot_img_grid(flow12.detach())
-
+            plot_img_grid(flow12)
 
 # %%
+
